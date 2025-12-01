@@ -1,4 +1,4 @@
-"""OpenRouter Integration for OpenWebUI.
+"""OpenRouter Pipe for Open WebUI
 
 This module provides integration with OpenRouter API for OpenWebUI, enabling access
 to multiple AI models through a unified interface. It supports model filtering,
@@ -9,7 +9,7 @@ Attributes:
     __version__: Module version string (0.5)
 
 Module Information:
-    - Title: OpenRouter Integration for OpenWebUI
+    - Title: OpenRouter Pipe for Open WebUI
     - Version: 0.5
     - License: MIT
 """
@@ -17,12 +17,13 @@ Module Information:
 import re
 import requests
 import json
-import traceback  # Import traceback for detailed error logging
+import traceback
+
 from typing import Optional, List, Union, Generator, Iterator, Callable
 from pydantic import BaseModel, Field
 
 
-def _insert_citations(text: str, citations: list[str]) -> str:
+def _insert_citations(text_content: str, citations: list[str]) -> str:
     """Replace citation markers in text with markdown links to citation URLs.
 
     This function processes text containing citation markers (e.g., [1], [2]) and
@@ -31,7 +32,7 @@ def _insert_citations(text: str, citations: list[str]) -> str:
     citations list (1-indexed in text, 0-indexed in list).
 
     Args:
-        text: The text containing citation markers like [1], [2], etc.
+        text_content: The text containing citation markers like [1], [2], etc.
         citations: A list of citation URLs, where index 0 corresponds to [1] in
             the text.
 
@@ -45,14 +46,14 @@ def _insert_citations(text: str, citations: list[str]) -> str:
         'See [[1]](https://example.com) for details'
     """
     # Early return if no citations or empty text to avoid unnecessary processing
-    if not citations or not text:
-        return text
+    if not citations or not text_content:
+        return text_content
 
     # Regex pattern to match citation markers: [1], [2], [123], etc.
     # Captures the number inside brackets for processing
-    pattern = r"\[(\d+)\]"
+    citation_marker_pattern = r"\[(\d+)\]"
 
-    def replace_citation(match_obj):
+    def replace_citation(citation_match_object):
         """Inner function to replace each citation marker with a markdown link.
         
         This function is called by re.sub() for each match found in the text.
@@ -61,30 +62,30 @@ def _insert_citations(text: str, citations: list[str]) -> str:
         """
         try:
             # Extract the citation number from the regex match (group 1)
-            num = int(match_obj.group(1))
+            citation_number = int(citation_match_object.group(1))
             
             # Validate citation number: must be between 1 and length of citations list
             # Note: Citations are 1-indexed in text ([1], [2]) but 0-indexed in list
-            if 1 <= num <= len(citations):
+            if 1 <= citation_number <= len(citations):
                 # Convert to 0-based index and get the corresponding URL
-                url = citations[num - 1]
+                citation_url = citations[citation_number - 1]
                 # Return markdown link format: [[1]](url)
-                return f"[[{num}]]({url})"
+                return f"[[{citation_number}]]({citation_url})"
             else:
                 # Citation number out of range - return original marker unchanged
-                return match_obj.group(0)
+                return citation_match_object.group(0)
         except (ValueError, IndexError):
             # Handle edge cases: invalid number format or index errors
             # Return original marker to preserve text integrity
-            return match_obj.group(0)
+            return citation_match_object.group(0)
 
     try:
         # Apply regex substitution to entire text, using replace_citation for each match
-        return re.sub(pattern, replace_citation, text)
+        return re.sub(citation_marker_pattern, replace_citation, text_content)
     except Exception as e:
         # Log error but return original text to prevent breaking the response
         print(f"Error during citation insertion: {e}")
-        return text
+        return text_content
 
 
 def _format_citation_list(citations: list[str]) -> str:
@@ -114,11 +115,11 @@ def _format_citation_list(citations: list[str]) -> str:
     try:
         # Create numbered list items: "1. url1", "2. url2", etc.
         # enumerate() provides 0-based index, so we add 1 for 1-based numbering
-        citation_list = [f"{i+1}. {url}" for i, url in enumerate(citations)]
+        formatted_citation_list = [f"{citation_index+1}. {citation_url}" for citation_index, citation_url in enumerate(citations)]
         
         # Combine separator, header, and numbered list with newlines
         # Format: "\n\n---\nCitations:\n1. url1\n2. url2\n..."
-        return "\n\n---\nCitations:\n" + "\n".join(citation_list)
+        return "\n\n---\nCitations:\n" + "\n".join(formatted_citation_list)
     except Exception as e:
         # Log error and return empty string to prevent breaking the response
         print(f"Error formatting citation list: {e}")
@@ -275,39 +276,39 @@ class Pipe:
 
         try:
             # Prepare authorization header with Bearer token
-            headers = {"Authorization": f"Bearer {self.valves.OPENROUTER_API_KEY}"}
+            request_headers = {"Authorization": f"Bearer {self.valves.OPENROUTER_API_KEY}"}
             
             # Fetch available models from OpenRouter API
             # This endpoint returns all models available through OpenRouter
-            response = requests.get(
+            api_response = requests.get(
                 "https://openrouter.ai/api/v1/models",
-                headers=headers,
+                headers=request_headers,
                 timeout=self.valves.REQUEST_TIMEOUT,
             )
             # Raise exception for HTTP error status codes (4xx, 5xx)
-            response.raise_for_status()
+            api_response.raise_for_status()
 
             # Parse JSON response and extract models array
             # OpenRouter returns: {"data": [model1, model2, ...]}
-            models_data = response.json()
-            raw_models_data = models_data.get("data", [])
-            models: List[dict] = []
+            models_response_data = api_response.json()
+            unfiltered_models_list = models_response_data.get("data", [])
+            filtered_models: List[dict] = []
 
             # --- Provider Filtering Logic ---
             # Parse provider filter string: convert to lowercase, split by comma,
             # strip whitespace, and create a set for O(1) lookup
-            provider_list_str = (self.valves.MODEL_PROVIDERS or "").lower()
-            invert_list = self.valves.INVERT_PROVIDER_LIST
+            provider_filter_string = (self.valves.MODEL_PROVIDERS or "").lower()
+            should_invert_provider_list = self.valves.INVERT_PROVIDER_LIST
             target_providers = {
-                p.strip() for p in provider_list_str.split(",") if p.strip()
+                provider_name.strip() for provider_name in provider_filter_string.split(",") if provider_name.strip()
             }
             # Empty set means no filtering (all providers included)
             # --- End Filtering Logic ---
 
             # Process each model from the API response
-            for model in raw_models_data:
+            for model_info in unfiltered_models_list:
                 # Extract model ID (required field)
-                model_id = model.get("id")
+                model_id = model_info.get("id")
                 if not model_id:
                     # Skip models without IDs (shouldn't happen, but defensive)
                     continue
@@ -318,21 +319,21 @@ class Pipe:
                     # Extract provider name from model_id
                     # Format is typically "provider/model-name" or just "model-name"
                     # Split on "/" and take first part, or use entire ID if no "/"
-                    provider = (
+                    model_provider = (
                         model_id.split("/", 1)[0].lower()
                         if "/" in model_id
                         else model_id.lower()
                     )
                     # Check if provider is in the target list
-                    provider_in_list = provider in target_providers
+                    is_provider_in_filter_list = model_provider in target_providers
                     
                     # Determine if model should be kept based on filter mode:
                     # - Include mode (not invert): keep if provider is in list
                     # - Exclude mode (invert): keep if provider is NOT in list
-                    keep = (provider_in_list and not invert_list) or (
-                        not provider_in_list and invert_list
+                    should_keep_model = (is_provider_in_filter_list and not should_invert_provider_list) or (
+                        not is_provider_in_filter_list and should_invert_provider_list
                     )
-                    if not keep:
+                    if not should_keep_model:
                         # Skip this model - doesn't match filter criteria
                         continue
 
@@ -343,16 +344,16 @@ class Pipe:
                     continue
 
                 # Get display name (use model's name field or fallback to ID)
-                model_name = model.get("name", model_id)
+                model_name = model_info.get("name", model_id)
                 # Apply optional prefix (e.g., "OR: " to distinguish from other sources)
-                prefix = self.valves.MODEL_PREFIX or ""
+                model_name_prefix = self.valves.MODEL_PREFIX or ""
 
                 # Add filtered model to results list
                 # Format: {"id": "openrouter-model-id", "name": "prefix Display Name"}
-                models.append({"id": model_id, "name": f"{prefix}{model_name}"})
+                filtered_models.append({"id": model_id, "name": f"{model_name_prefix}{model_name}"})
 
             # Handle case where no models passed the filters
-            if not models:
+            if not filtered_models:
                 # Provide specific error messages based on which filter was applied
                 if self.valves.FREE_ONLY:
                     return [{"id": "error", "name": "Pipe Error: No free models found"}]
@@ -373,40 +374,40 @@ class Pipe:
                     ]
 
             # Return successfully filtered and formatted model list
-            return models
+            return filtered_models
 
         except requests.exceptions.Timeout:
             # Request exceeded the configured timeout
             print("Error fetching models: Request timed out.")
             return [{"id": "error", "name": "Pipe Error: Timeout fetching models"}]
-        except requests.exceptions.HTTPError as e:
+        except requests.exceptions.HTTPError as http_error:
             # HTTP error response (4xx, 5xx status codes)
-            error_msg = f"Pipe Error: HTTP {e.response.status_code} fetching models"
+            error_message = f"Pipe Error: HTTP {http_error.response.status_code} fetching models"
             try:
                 # Try to extract detailed error message from API response
                 # OpenRouter may provide error details in JSON format
-                error_detail = e.response.json().get("error", {}).get("message", "")
+                error_detail = http_error.response.json().get("error", {}).get("message", "")
                 if error_detail:
-                    error_msg += f": {error_detail}"
+                    error_message += f": {error_detail}"
             except json.JSONDecodeError:
                 # Response is not valid JSON, use generic error message
                 pass
-            print(f"Error fetching models: {error_msg} (URL: {e.request.url})")
-            return [{"id": "error", "name": error_msg}]
-        except requests.exceptions.RequestException as e:
+            print(f"Error fetching models: {error_message} (URL: {http_error.request.url})")
+            return [{"id": "error", "name": error_message}]
+        except requests.exceptions.RequestException as request_exception:
             # Network-level errors (connection refused, DNS failure, etc.)
-            print(f"Error fetching models: Request failed: {e}")
+            print(f"Error fetching models: Request failed: {request_exception}")
             return [
                 {
                     "id": "error",
-                    "name": f"Pipe Error: Network error fetching models: {e}",
+                    "name": f"Pipe Error: Network error fetching models: {request_exception}",
                 }
             ]
-        except Exception as e:
+        except Exception as unexpected_error:
             # Catch-all for any unexpected errors (programming errors, etc.)
-            print(f"Unexpected error fetching models: {e}")
+            print(f"Unexpected error fetching models: {unexpected_error}")
             traceback.print_exc()
-            return [{"id": "error", "name": f"Pipe Error: Unexpected error: {e}"}]
+            return [{"id": "error", "name": f"Pipe Error: Unexpected error: {unexpected_error}"}]
 
     def pipe(self, body: dict) -> Union[str, Generator[str, None, None], Iterator[str]]:
         """Process incoming chat requests from OpenWebUI.
@@ -441,83 +442,83 @@ class Pipe:
 
         try:
             # Create a copy of the request body to avoid modifying the original
-            payload = body.copy()
+            request_payload = body.copy()
             
             # Handle model ID format: OpenWebUI may prefix model IDs with a dot notation
             # (e.g., "pipe.model-name") - we need to extract just the model name
-            if "model" in payload and payload["model"] and "." in payload["model"]:
+            if "model" in request_payload and request_payload["model"] and "." in request_payload["model"]:
                 # Split on first dot and take everything after it
                 # Example: "pipe.openai/gpt-4" -> "openai/gpt-4"
-                payload["model"] = payload["model"].split(".", 1)[1]
+                request_payload["model"] = request_payload["model"].split(".", 1)[1]
 
             # --- Apply Cache Control Logic ---
             # OpenRouter supports prompt caching to reduce costs on repeated prefixes
             # We apply cache_control to the longest text part in system/user messages
-            if self.valves.ENABLE_CACHE_CONTROL and "messages" in payload:
+            if self.valves.ENABLE_CACHE_CONTROL and "messages" in request_payload:
                 try:
-                    cache_applied = False
-                    messages = payload["messages"]
+                    cache_control_applied = False
+                    message_list = request_payload["messages"]
 
                     # Strategy 1: Try applying cache_control to System Message
                     # System messages are typically the longest and most stable parts
-                    for i, msg in enumerate(messages):
+                    for message_index, message in enumerate(message_list):
                         # Only process system messages with list-based content
-                        if msg.get("role") == "system" and isinstance(
-                            msg.get("content"), list
+                        if message.get("role") == "system" and isinstance(
+                            message.get("content"), list
                         ):
                             # Find the longest text part in the message
-                            longest_index, max_len = -1, -1
-                            for j, part in enumerate(msg["content"]):
-                                if part.get("type") == "text":
-                                    text_len = len(part.get("text", ""))
-                                    if text_len > max_len:
-                                        max_len, longest_index = text_len, j
+                            longest_part_index, maximum_text_length = -1, -1
+                            for part_index, content_part in enumerate(message["content"]):
+                                if content_part.get("type") == "text":
+                                    text_content_length = len(content_part.get("text", ""))
+                                    if text_content_length > maximum_text_length:
+                                        maximum_text_length, longest_part_index = text_content_length, part_index
                             
                             # Apply ephemeral cache control to longest text part
                             # "ephemeral" means cache is cleared after conversation ends
-                            if longest_index != -1:
-                                msg["content"][longest_index]["cache_control"] = {
+                            if longest_part_index != -1:
+                                message["content"][longest_part_index]["cache_control"] = {
                                     "type": "ephemeral"
                                 }
-                                cache_applied = True
+                                cache_control_applied = True
                                 break
 
                     # Strategy 2: Fallback to Last User Message
                     # If no system message found, use the most recent user message
-                    if not cache_applied:
+                    if not cache_control_applied:
                         # Iterate backwards to find the last user message
-                        for msg in reversed(messages):
-                            if msg.get("role") == "user" and isinstance(
-                                msg.get("content"), list
+                        for message in reversed(message_list):
+                            if message.get("role") == "user" and isinstance(
+                                message.get("content"), list
                             ):
                                 # Find longest text part in user message
-                                longest_index, max_len = -1, -1
-                                for j, part in enumerate(msg["content"]):
-                                    if part.get("type") == "text":
-                                        text_len = len(part.get("text", ""))
-                                        if text_len > max_len:
-                                            max_len, longest_index = text_len, j
+                                longest_part_index, maximum_text_length = -1, -1
+                                for part_index, content_part in enumerate(message["content"]):
+                                    if content_part.get("type") == "text":
+                                        text_content_length = len(content_part.get("text", ""))
+                                        if text_content_length > maximum_text_length:
+                                            maximum_text_length, longest_part_index = text_content_length, part_index
                                 
                                 # Apply cache control to longest part
-                                if longest_index != -1:
-                                    msg["content"][longest_index]["cache_control"] = {
+                                if longest_part_index != -1:
+                                    message["content"][longest_part_index]["cache_control"] = {
                                         "type": "ephemeral"
                                     }
                                     break
-                except Exception as cache_err:
+                except Exception as cache_control_error:
                     # Log cache control errors but don't fail the request
                     # Cache control is an optimization, not a requirement
-                    print(f"Warning: Error applying cache_control logic: {cache_err}")
+                    print(f"Warning: Error applying cache_control logic: {cache_control_error}")
                     traceback.print_exc()
             # --- End Cache Control Logic ---
 
             # Add reasoning token request if enabled
             # Some models (like o1) support reasoning tokens that show internal thinking
             if self.valves.INCLUDE_REASONING:
-                payload["include_reasoning"] = True
+                request_payload["include_reasoning"] = True
 
             # Prepare HTTP headers for OpenRouter API request
-            headers = {
+            request_headers = {
                 "Authorization": f"Bearer {self.valves.OPENROUTER_API_KEY}",
                 "Content-Type": "application/json",
                 # OpenRouter uses these headers for analytics and attribution
@@ -526,18 +527,18 @@ class Pipe:
             }
 
             # OpenRouter chat completions endpoint
-            url = "https://openrouter.ai/api/v1/chat/completions"
+            openrouter_api_url = "https://openrouter.ai/api/v1/chat/completions"
             
             # Determine if client requested streaming response
-            is_streaming = body.get("stream", False)
+            is_streaming_request = body.get("stream", False)
 
             # Route to appropriate handler based on streaming preference
-            if is_streaming:
+            if is_streaming_request:
                 # Streaming: yield chunks as they arrive for real-time display
                 return self.stream_response(
-                    url,
-                    headers,
-                    payload,
+                    openrouter_api_url,
+                    request_headers,
+                    request_payload,
                     _insert_citations,
                     _format_citation_list,
                     self.valves.REQUEST_TIMEOUT,
@@ -545,27 +546,27 @@ class Pipe:
             else:
                 # Non-streaming: wait for complete response and return all at once
                 return self.non_stream_response(
-                    url,
-                    headers,
-                    payload,
+                    openrouter_api_url,
+                    request_headers,
+                    request_payload,
                     _insert_citations,
                     _format_citation_list,
                     self.valves.REQUEST_TIMEOUT,
                 )
 
-        except Exception as e:
-            print(f"Error preparing request in pipe method: {e}")
+        except Exception as request_preparation_error:
+            print(f"Error preparing request in pipe method: {request_preparation_error}")
             traceback.print_exc()
-            return f"Pipe Error: Failed to prepare request: {e}"
+            return f"Pipe Error: Failed to prepare request: {request_preparation_error}"
 
     def non_stream_response(
         self,
-        url: str,
-        headers: dict,
-        payload: dict,
+        api_endpoint_url: str,
+        request_headers: dict,
+        request_payload: dict,
         citation_inserter: Callable[[str, list[str]], str],
         citation_formatter: Callable[[list[str]], str],
-        timeout: int,
+        request_timeout: int,
     ) -> str:
         """Handle non-streaming API requests to OpenRouter.
 
@@ -574,12 +575,12 @@ class Pipe:
         output appropriately.
 
         Args:
-            url: The API endpoint URL for chat completions.
-            headers: HTTP headers including authorization and content type.
-            payload: The request payload containing model, messages, etc.
+            api_endpoint_url: The API endpoint URL for chat completions.
+            request_headers: HTTP headers including authorization and content type.
+            request_payload: The request payload containing model, messages, etc.
             citation_inserter: Function to insert citations into text.
             citation_formatter: Function to format citation lists.
-            timeout: Request timeout in seconds.
+            request_timeout: Request timeout in seconds.
 
         Returns:
             str: The formatted response text including:
@@ -594,87 +595,87 @@ class Pipe:
         """
         try:
             # Send POST request to OpenRouter API with JSON payload
-            response = requests.post(
-                url, headers=headers, json=payload, timeout=timeout
+            api_response = requests.post(
+                api_endpoint_url, headers=request_headers, json=request_payload, timeout=request_timeout
             )
             # Raise exception for HTTP error status codes
-            response.raise_for_status()
+            api_response.raise_for_status()
 
             # Parse JSON response from API
-            res = response.json()
+            response_data = api_response.json()
             
             # Validate response structure - must have choices array
-            if not res.get("choices"):
+            if not response_data.get("choices"):
                 # Empty response (shouldn't happen normally)
                 return ""
 
             # Extract first choice (OpenRouter typically returns one choice)
-            choice = res["choices"][0]
-            message = choice.get("message", {})
+            first_choice = response_data["choices"][0]
+            response_message = first_choice.get("message", {})
             
             # Extract citations if present (some models provide source citations)
-            citations = res.get("citations", [])
+            citation_urls = response_data.get("citations", [])
 
             # Extract content and reasoning from message
             # Reasoning tokens show internal model thinking (o1, etc.)
-            content = message.get("content", "")
-            reasoning = message.get("reasoning", "")
+            response_content = response_message.get("content", "")
+            response_reasoning = response_message.get("reasoning", "")
 
             # Insert citation markers into both content and reasoning text
             # This converts [1], [2] markers into clickable markdown links
-            content = citation_inserter(content, citations)
-            reasoning = citation_inserter(reasoning, citations)
+            response_content = citation_inserter(response_content, citation_urls)
+            response_reasoning = citation_inserter(response_reasoning, citation_urls)
             
             # Format citations as a numbered list for appending to response
-            citation_list = citation_formatter(citations)
+            formatted_citation_list = citation_formatter(citation_urls)
 
             # Build final response string with proper formatting
-            final = ""
+            final_response_text = ""
             
             # Add reasoning block if present (wrapped in special tags for UI)
             # OpenWebUI uses <think> tags to hide/show reasoning
-            if reasoning:
-                final += f"<think>\n{reasoning}\n</think>\n\n"
+            if response_reasoning:
+                final_response_text += f"<think>\n{response_reasoning}\n</think>\n\n"
             
             # Add main content after reasoning
-            if content:
-                final += content
+            if response_content:
+                final_response_text += response_content
             
             # Append citation list at the end if we have any content
-            if final:
-                final += citation_list
+            if final_response_text:
+                final_response_text += formatted_citation_list
             
-            return final
+            return final_response_text
 
         except requests.exceptions.Timeout:
             # Request exceeded timeout - return user-friendly error
-            return f"Pipe Error: Request timed out ({timeout}s)"
-        except requests.exceptions.HTTPError as e:
+            return f"Pipe Error: Request timed out ({request_timeout}s)"
+        except requests.exceptions.HTTPError as http_error:
             # HTTP error response - try to extract detailed error message
-            error_msg = f"Pipe Error: API returned HTTP {e.response.status_code}"
+            error_message = f"Pipe Error: API returned HTTP {http_error.response.status_code}"
             try:
                 # OpenRouter may provide error details in JSON response
-                detail = e.response.json().get("error", {}).get("message", "")
-                if detail:
-                    error_msg += f": {detail}"
+                error_detail = http_error.response.json().get("error", {}).get("message", "")
+                if error_detail:
+                    error_message += f": {error_detail}"
             except Exception:
                 # Response is not JSON or doesn't have expected structure
                 pass
-            return error_msg
-        except Exception as e:
+            return error_message
+        except Exception as unexpected_error:
             # Catch-all for unexpected errors (parsing, logic errors, etc.)
-            print(f"Unexpected error in non_stream_response: {e}")
+            print(f"Unexpected error in non_stream_response: {unexpected_error}")
             traceback.print_exc()
-            return f"Pipe Error: Unexpected error processing response: {e}"
+            return f"Pipe Error: Unexpected error processing response: {unexpected_error}"
 
     def stream_response(
         self,
-        url: str,
-        headers: dict,
-        payload: dict,
+        api_endpoint_url: str,
+        request_headers: dict,
+        request_payload: dict,
         citation_inserter: Callable[[str, list[str]], str],
         citation_formatter: Callable[[list[str]], str],
-        timeout: int,
+        request_timeout: int,
     ) -> Generator[str, None, None]:
         """Handle streaming API requests to OpenRouter.
 
@@ -684,12 +685,12 @@ class Pipe:
         appends citations at the end.
 
         Args:
-            url: The API endpoint URL for chat completions.
-            headers: HTTP headers including authorization and content type.
-            payload: The request payload containing model, messages, etc.
+            api_endpoint_url: The API endpoint URL for chat completions.
+            request_headers: HTTP headers including authorization and content type.
+            request_payload: The request payload containing model, messages, etc.
             citation_inserter: Function to insert citations into text chunks.
             citation_formatter: Function to format citation lists.
-            timeout: Request timeout in seconds.
+            request_timeout: Request timeout in seconds.
 
         Yields:
             str: Response chunks as they arrive from the API, including:
@@ -707,114 +708,114 @@ class Pipe:
             - Response is properly closed even if errors occur
         """
         # Initialize response variable for cleanup in finally block
-        response = None
+        streaming_response = None
         try:
             # Send streaming POST request - stream=True enables chunked response handling
-            response = requests.post(
-                url, headers=headers, json=payload, stream=True
+            streaming_response = requests.post(
+                api_endpoint_url, headers=request_headers, json=request_payload, stream=True
             )
             # Raise exception for HTTP error status codes
-            response.raise_for_status()
+            streaming_response.raise_for_status()
             
             # State tracking for streaming response formatting
-            yielded_think_start = False  # Track if we've started the <think> block
-            closed_think = False  # Track if we've closed the <think> block
-            latest_citations: List[str] = []  # List of citations from the latest chunk
-            citation_list_yielded = (
+            has_yielded_reasoning_start_tag = False  # Track if we've started the <think> block
+            has_closed_reasoning_block = False  # Track if we've closed the <think> block
+            latest_citation_urls: List[str] = []  # List of citations from the latest chunk
+            has_yielded_citation_list = (
                 False  # Ensure citation list is only yielded once at the end
             )
             
             # Process streaming response line by line
             # OpenRouter uses Server-Sent Events (SSE) format: "data: {...}\n\n"
-            for line in response.iter_lines():
+            for response_line in streaming_response.iter_lines():
                 # Skip empty lines and non-data lines (comments, etc.)
-                if not line or not line.startswith(b"data: "):
+                if not response_line or not response_line.startswith(b"data: "):
                     continue
                 
                 # Extract JSON data from SSE line format: "data: {...}"
-                data = line[len(b"data: ") :].decode("utf-8")
+                sse_data_string = response_line[len(b"data: ") :].decode("utf-8")
                 
                 # OpenRouter sends "[DONE]" to signal end of stream
-                if data == "[DONE]":
+                if sse_data_string == "[DONE]":
                     break
                 
                 # Parse JSON chunk from SSE data line
                 try:
-                    chunk = json.loads(data)
+                    response_chunk = json.loads(sse_data_string)
                 except json.JSONDecodeError:
                     # Skip malformed JSON chunks (shouldn't happen but defensive)
                     continue
                 
                 # Process chunk if it contains choices array
-                if "choices" in chunk:
-                    choice = chunk["choices"][0]
+                if "choices" in response_chunk:
+                    first_choice = response_chunk["choices"][0]
                     
                     # Update citations if present in this chunk
                     # Citations may be updated throughout the stream
-                    citations = chunk.get("citations")
-                    if citations is not None:
-                        latest_citations = citations
+                    chunk_citations = response_chunk.get("citations")
+                    if chunk_citations is not None:
+                        latest_citation_urls = chunk_citations
                     
                     # Extract delta (incremental changes) from choice
                     # Delta contains only the new content since last chunk
-                    delta = choice.get("delta", {})
-                    reasoning = delta.get("reasoning", "")
-                    content = delta.get("content", "")
+                    content_delta = first_choice.get("delta", {})
+                    reasoning_chunk = content_delta.get("reasoning", "")
+                    content_chunk = content_delta.get("content", "")
                     
                     # Handle reasoning chunks (internal model thinking)
-                    if reasoning:
+                    if reasoning_chunk:
                         # Yield opening tag on first reasoning chunk
                         # This marks the start of reasoning content for UI rendering
-                        if not yielded_think_start:
+                        if not has_yielded_reasoning_start_tag:
                             yield "<think>\n"
-                            yielded_think_start = True
+                            has_yielded_reasoning_start_tag = True
                         
                         # Yield reasoning chunk with citations inserted in real-time
                         # Citations are inserted as they appear in the stream
-                        yield citation_inserter(reasoning, latest_citations)
+                        yield citation_inserter(reasoning_chunk, latest_citation_urls)
                     
                     # Handle content chunks (actual response text)
-                    if content:
+                    if content_chunk:
                         # Transition from reasoning to content: close reasoning block
                         # This happens when model switches from thinking to responding
-                        if yielded_think_start and not closed_think:
+                        if has_yielded_reasoning_start_tag and not has_closed_reasoning_block:
                             yield "\n</think>\n\n"
-                            closed_think = True
+                            has_closed_reasoning_block = True
                         
                         # Yield content chunk with citations inserted in real-time
-                        yield citation_inserter(content, latest_citations)
+                        yield citation_inserter(content_chunk, latest_citation_urls)
             
             # Final cleanup: Close reasoning block if it was left open
             # This handles edge case where response is reasoning-only (no content)
-            if yielded_think_start and not closed_think:
+            if has_yielded_reasoning_start_tag and not has_closed_reasoning_block:
                 yield "\n</think>\n\n"
             
             # Yield formatted citation list exactly once at the end of stream
             # This ensures citations appear after all content, not scattered throughout
-            if not citation_list_yielded:
-                yield citation_formatter(latest_citations)
-                citation_list_yielded = True
+            if not has_yielded_citation_list:
+                yield citation_formatter(latest_citation_urls)
+                has_yielded_citation_list = True
         except requests.exceptions.Timeout:
             # Request exceeded timeout - yield error message
             yield f"Pipe Error: Request timed out"
             # Yield final citations if any were collected before timeout
             # This ensures partial citations aren't lost on error
-            if latest_citations and not citation_list_yielded:
-                yield citation_formatter(latest_citations)
-        except requests.exceptions.HTTPError as e:
+            if latest_citation_urls and not has_yielded_citation_list:
+                yield citation_formatter(latest_citation_urls)
+        except requests.exceptions.HTTPError as http_error:
             # HTTP error response - yield error with status code
-            yield f"Pipe Error: API returned HTTP {e.response.status_code}"
+            yield f"Pipe Error: API returned HTTP {http_error.response.status_code}"
             # Yield final citations if any were collected before error
-            if latest_citations and not citation_list_yielded:
-                yield citation_formatter(latest_citations)
-        except Exception as e:
+            if latest_citation_urls and not has_yielded_citation_list:
+                yield citation_formatter(latest_citation_urls)
+        except Exception as streaming_error:
             # Catch-all for unexpected errors during streaming
-            yield f"Pipe Error: Unexpected error during streaming: {e}"
+            yield f"Pipe Error: Unexpected error during streaming: {streaming_error}"
             # Yield final citations if any were collected before error
-            if latest_citations and not citation_list_yielded:
-                yield citation_formatter(latest_citations)
+            if latest_citation_urls and not has_yielded_citation_list:
+                yield citation_formatter(latest_citation_urls)
         finally:
             # Always close response connection to free resources
             # This is critical for streaming responses to prevent connection leaks
-            if response:
-                response.close()
+            if streaming_response:
+                streaming_response.close()
