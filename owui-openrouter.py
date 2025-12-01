@@ -23,7 +23,7 @@ from typing import Optional, List, Union, Generator, Iterator, Callable
 from pydantic import BaseModel, Field
 
 
-def _insert_citations(text_content: str, citations: list[str]) -> str:
+def insert_citations(text_content: str, citations: list[str]) -> str:
     """Replace citation markers in text with markdown links to citation URLs.
 
     This function processes text containing citation markers (e.g., [1], [2]) and
@@ -88,7 +88,7 @@ def _insert_citations(text_content: str, citations: list[str]) -> str:
         return text_content
 
 
-def _format_citation_list(citations: list[str]) -> str:
+def format_citation_list(citations: list[str]) -> str:
     """Format a list of citation URLs into a markdown-formatted string.
 
     This function takes a list of citation URLs and formats them as a numbered
@@ -579,8 +579,8 @@ class Pipe:
                     openrouter_api_url,
                     request_headers,
                     request_payload,
-                    _insert_citations,
-                    _format_citation_list,
+                    insert_citations,
+                    format_citation_list,
                     self.valves.REQUEST_TIMEOUT,
                 )
             else:
@@ -589,8 +589,8 @@ class Pipe:
                     openrouter_api_url,
                     request_headers,
                     request_payload,
-                    _insert_citations,
-                    _format_citation_list,
+                    insert_citations,
+                    format_citation_list,
                     self.valves.REQUEST_TIMEOUT,
                 )
 
