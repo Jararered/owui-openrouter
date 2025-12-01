@@ -80,6 +80,30 @@ def _format_citation_list(citations: list[str]) -> str:
         print(f"Error formatting citation list: {e}")
         return ""
 
+# --- Helper function for getting the provider logo ---
+def _get_provider_logo(provider: str) -> str:
+    """
+    Retrieves the logo URL for a given model provider.
+    
+    Args:
+        provider (str): The lowercase provider name (e.g., extracted from model_id.split("/")[0]).
+    
+    Returns:
+        str: The logo URL for the provider. Defaults to a generic AI logo if not mapped.
+    """
+    provider_logos = {
+        "openai": "https://cdn.openai.com/chatgpt/images/chatgpt-logo.png",
+        "anthropic": "https://www.anthropic.com/_next/image?url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2Flogo.png&w=256&q=75",
+        "google": "https://www.gstatic.com/lamda/images/favicon_v1_150160cddce1a30e1fedc0bec0c0cfe62c0931b8.png",
+        "meta": "https://static.xx.fbcdn.net/rsrc.php/y8/r/dF5SId3UHWd.svg",
+        "mistralai": "https://mistral.ai/images/logo.png",
+        "together": "https://together.ai/logo.png",
+        # Add more providers as needed based on OpenRouter's API
+    }
+    # Use a default logo for unmapped providers (e.g., a generic AI icon)
+    default_logo = "https://via.placeholder.com/50x50/cccccc/000000?text=AI"
+    return provider_logos.get(provider.lower(), default_logo)
+
 
 # --- Main Pipe class ---
 class Pipe:
@@ -179,9 +203,16 @@ class Pipe:
                 if self.valves.FREE_ONLY and "free" not in model_id.lower():
                     continue
 
+                # Get the model name and prefix
                 model_name = model.get("name", model_id)
                 prefix = self.valves.MODEL_PREFIX or ""
-                models.append({"id": model_id, "name": f"{prefix}{model_name}"})
+
+                # Get the provider and logo
+                provider = model_id.split("/")[0]
+                provider_logo = _get_provider_logo(provider.lower())
+
+                # Add the model to the list
+                models.append({"id": model_id, "name": f"{prefix}{model_name}", "logo": provider_logo})
 
             if not models:
                 if self.valves.FREE_ONLY:
@@ -304,6 +335,7 @@ class Pipe:
                 "HTTP-Referer": body.get("http_referer", "https://openwebui.com/"),
                 "X-Title": body.get("x_title", "Open WebUI via Pipe"),
             }
+
             url = "https://openrouter.ai/api/v1/chat/completions"
             is_streaming = body.get("stream", False)
 
@@ -382,13 +414,13 @@ class Pipe:
             return f"Pipe Error: Unexpected error processing response: {e}"
 
     def stream_response(
-        self, url, headers, payload, citation_inserter, citation_formatter, timeout
+        self, url, headers, payload, citation_inserter, citation_formatter, timeoutFD
     ) -> Generator[str, None, None]:
         """Handles streaming API requests using a generator."""
         response = None
         try:
             response = requests.post(
-                url, headers=headers, json=payload, stream=True, timeout=timeout
+                url, headers=headers, json=payload, stream=True
             )
             response.raise_for_status()
             yielded_think_start = False  # Track if we've started the <think> block
@@ -439,7 +471,7 @@ class Pipe:
                 yield citation_formatter(latest_citations)
                 citation_list_yielded = True
         except requests.exceptions.Timeout:
-            yield f"Pipe Error: Request timed out ({timeout}s)"
+            yield f"Pipe Error: Request timed out"
             # Yield final citations if any were collected before error
             if latest_citations and not citation_list_yielded:
                 yield citation_formatter(latest_citations)
