@@ -6,23 +6,12 @@ streaming responses, citation handling, and optional features like reasoning tok
 and cache control.
 
 Attributes:
-    __version__: Module version string (0.4.1)
+    __version__: Module version string (0.5)
 
 Module Information:
     - Title: OpenRouter Integration for OpenWebUI
-    - Version: 0.4.1
-    - Author: kevarch
-    - Author URL: https://github.com/kevarch
-    - Contributor: Eloi Marques da Silva (https://github.com/eloimarquessilva)
-    - Credits: rburmorrison (https://github.com/rburmorrison), Google Gemini Pro 2.5
+    - Version: 0.5
     - License: MIT
-
-Changelog:
-    Version 0.4.1:
-        - Contribution by Eloi Marques da Silva
-        - Added FREE_ONLY parameter to optionally filter and display only free models
-        - Changed MODEL_PREFIX and MODEL_PROVIDERS from required (str) to optional
-          (Optional[str]), allowing null values
 """
 
 import re
