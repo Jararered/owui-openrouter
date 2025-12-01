@@ -1,39 +1,59 @@
-"""
-title: OpenRouter Integration for OpenWebUI
-version: 0.4.1
-description: Integration with OpenRouter for OpenWebUI with Free Model Filtering and optional field improvements
-author: kevarch
-author_url: https://github.com/kevarch
-contributor: Eloi Marques da Silva (https://github.com/eloimarquessilva)
-credits: rburmorrison (https://github.com/rburmorrison), Google Gemini Pro 2.5
-license: MIT
+"""OpenRouter Integration for OpenWebUI.
+
+This module provides integration with OpenRouter API for OpenWebUI, enabling access
+to multiple AI models through a unified interface. It supports model filtering,
+streaming responses, citation handling, and optional features like reasoning tokens
+and cache control.
+
+Attributes:
+    __version__: Module version string (0.4.1)
+
+Module Information:
+    - Title: OpenRouter Integration for OpenWebUI
+    - Version: 0.4.1
+    - Author: kevarch
+    - Author URL: https://github.com/kevarch
+    - Contributor: Eloi Marques da Silva (https://github.com/eloimarquessilva)
+    - Credits: rburmorrison (https://github.com/rburmorrison), Google Gemini Pro 2.5
+    - License: MIT
 
 Changelog:
-- Version 0.4.1:
-  * Contribution by Eloi Marques da Silva
-  * Added FREE_ONLY parameter to optionally filter and display only free models in OpenWebUI.
-  * Changed MODEL_PREFIX and MODEL_PROVIDERS from required (str) to optional (Optional[str]), allowing null values.
+    Version 0.4.1:
+        - Contribution by Eloi Marques da Silva
+        - Added FREE_ONLY parameter to optionally filter and display only free models
+        - Changed MODEL_PREFIX and MODEL_PROVIDERS from required (str) to optional
+          (Optional[str]), allowing null values
 """
 
 import re
 import requests
 import json
 import traceback  # Import traceback for detailed error logging
-from typing import Optional, List, Union, Generator, Iterator
+from typing import Optional, List, Union, Generator, Iterator, Callable
 from pydantic import BaseModel, Field
 
 
-# --- Helper function for citation text insertion ---
 def _insert_citations(text: str, citations: list[str]) -> str:
-    """
-    Replace citation markers [n] in text with markdown links to the corresponding citation URLs.
+    """Replace citation markers in text with markdown links to citation URLs.
+
+    This function processes text containing citation markers (e.g., [1], [2]) and
+    replaces them with markdown-formatted links to the corresponding URLs from the
+    citations list. The citation number in brackets corresponds to the index in the
+    citations list (1-indexed in text, 0-indexed in list).
 
     Args:
         text: The text containing citation markers like [1], [2], etc.
-        citations: A list of citation URLs, where index 0 corresponds to [1] in the text
+        citations: A list of citation URLs, where index 0 corresponds to [1] in
+            the text.
 
     Returns:
-        Text with citation markers replaced with markdown links
+        str: Text with citation markers replaced with markdown links. Returns the
+            original text if citations are empty or if an error occurs during
+            processing.
+
+    Example:
+        >>> _insert_citations("See [1] for details", ["https://example.com"])
+        'See [[1]](https://example.com) for details'
     """
     if not citations or not text:
         return text
@@ -58,17 +78,25 @@ def _insert_citations(text: str, citations: list[str]) -> str:
         return text
 
 
-# --- Helper function for formatting the final citation list ---
 def _format_citation_list(citations: list[str]) -> str:
-    """
-    Formats a list of citation URLs into a markdown string.
+    """Format a list of citation URLs into a markdown-formatted string.
+
+    This function takes a list of citation URLs and formats them as a numbered
+    markdown list with a separator header. The output is suitable for appending
+    to the end of a response.
 
     Args:
-        citations: A list of citation URLs.
+        citations: A list of citation URLs to format.
 
     Returns:
-        A formatted markdown string (e.g., "\n\n---\nCitations:\n1. url1\n2. url2")
-        or an empty string if no citations are provided.
+        str: A formatted markdown string with a separator and numbered list of
+            citations (e.g., "\\n\\n---\\nCitations:\\n1. url1\\n2. url2").
+            Returns an empty string if no citations are provided or if an error
+            occurs.
+
+    Example:
+        >>> _format_citation_list(["https://example.com", "https://test.com"])
+        '\\n\\n---\\nCitations:\\n1. https://example.com\\n2. https://test.com'
     """
     if not citations:
         return ""
@@ -80,37 +108,71 @@ def _format_citation_list(citations: list[str]) -> str:
         print(f"Error formatting citation list: {e}")
         return ""
 
-# --- Helper function for getting the provider logo ---
 def _get_provider_logo(provider: str) -> str:
-    """
-    Retrieves the logo URL for a given model provider.
-    
+    """Retrieve the logo URL for a given model provider.
+
+    This function maps provider names to their corresponding logo URLs. It supports
+    common providers like OpenAI, Anthropic, Google, Meta, and Mistral AI. For
+    unmapped providers, it returns a default placeholder logo.
+
     Args:
-        provider (str): The lowercase provider name (e.g., extracted from model_id.split("/")[0]).
-    
+        provider: The provider name (case-insensitive). Typically extracted from
+            model_id by splitting on "/" and taking the first part.
+
     Returns:
-        str: The logo URL for the provider. Defaults to a generic AI logo if not mapped.
+        str: The logo URL for the provider. Returns a default placeholder logo URL
+            if the provider is not in the mapping.
+
+    Example:
+        >>> _get_provider_logo("openai")
+        'https://assets.streamlinehq.com/image/...'
+        >>> _get_provider_logo("unknown")
+        'https://via.placeholder.com/50x50/cccccc/000000?text=AI'
     """
     provider_logos = {
-        "openai": "https://cdn.openai.com/chatgpt/images/chatgpt-logo.png",
-        "anthropic": "https://www.anthropic.com/_next/image?url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2Flogo.png&w=256&q=75",
-        "google": "https://www.gstatic.com/lamda/images/favicon_v1_150160cddce1a30e1fedc0bec0c0cfe62c0931b8.png",
-        "meta": "https://static.xx.fbcdn.net/rsrc.php/y8/r/dF5SId3UHWd.svg",
-        "mistralai": "https://mistral.ai/images/logo.png",
-        "together": "https://together.ai/logo.png",
-        # Add more providers as needed based on OpenRouter's API
+        "openai": "https://assets.streamlinehq.com/image/private/w_300,h_300,ar_1/f_auto/v1/icons/logos/openai-wx0xqojo8lrv572wcvlcb.png/openai-twkvg10vdyltj9fklcgusg.png",
+        "anthropic": "https://assets.streamlinehq.com/image/private/w_300,h_300,ar_1/f_auto/v1/icons/1/anthropic-icon-wii9u8ifrjrd99btrqfgi.png/anthropic-icon-tdvkiqisswbrmtkiygb0ia.png",
+        "google": "https://assets.streamlinehq.com/image/private/w_300,h_300,ar_1/f_auto/v1/icons/3/google-icon-x87417ck9qy0ewcfgiv8.png/google-icon-yzx71jsaunfrqgy93lkp0c.png",
+        "meta": "https://assets.streamlinehq.com/image/private/w_300,h_300,ar_1/f_auto/v1/icons/4/meta-icon-w3lbidoopysan5m03f7159.png/meta-icon-totu193thz4r6sryadyus.png",
+        "mistralai": "https://assets.streamlinehq.com/image/private/w_300,h_300,ar_1/f_auto/v1/icons/4/mistral-ai-icon-3djkpjyks645ah3bg6zbxo.png/mistral-ai-icon-72wf09t6yllwqfky4jm3ql.png",
     }
+
     # Use a default logo for unmapped providers (e.g., a generic AI icon)
     default_logo = "https://via.placeholder.com/50x50/cccccc/000000?text=AI"
     return provider_logos.get(provider.lower(), default_logo)
 
 
-# --- Main Pipe class ---
 class Pipe:
+    """Main pipe class for OpenRouter integration with OpenWebUI.
+
+    This class implements the OpenWebUI pipe interface, providing access to multiple
+    AI models through the OpenRouter API. It handles model discovery, request
+    processing, streaming responses, and various configuration options.
+
+    Attributes:
+        type: Always set to "manifold" to indicate this pipe provides multiple models.
+        valves: Configuration object containing all user-configurable settings.
+    """
+
     class Valves(BaseModel):
-        # User-configurable settings
+        """Configuration settings for the OpenRouter pipe.
+
+        This Pydantic model defines all configurable parameters that users can set
+        in OpenWebUI to customize the behavior of the OpenRouter integration.
+
+        Attributes:
+            OPENROUTER_API_KEY: OpenRouter API key (required for operation).
+            INCLUDE_REASONING: Whether to request reasoning tokens from models.
+            MODEL_PREFIX: Optional prefix to add to model names in OpenWebUI.
+            REQUEST_TIMEOUT: Timeout for API requests in seconds (must be > 0).
+            MODEL_PROVIDERS: Comma-separated list of providers to include/exclude.
+            INVERT_PROVIDER_LIST: If True, MODEL_PROVIDERS becomes an exclude list.
+            ENABLE_CACHE_CONTROL: Enable OpenRouter prompt caching for cost savings.
+            FREE_ONLY: If True, only show free models in the model list.
+        """
         OPENROUTER_API_KEY: str = Field(
-            default="", description="Your OpenRouter API key (required)."
+            default="",
+            description="Your OpenRouter API key (required).",
         )
         INCLUDE_REASONING: bool = Field(
             default=True,
@@ -120,7 +182,6 @@ class Pipe:
             default=None,
             description="Optional prefix for model names in Open WebUI (e.g., 'OR: ').",
         )
-        # NEW: Configurable request timeout
         REQUEST_TIMEOUT: int = Field(
             default=90,
             description="Timeout for API requests in seconds.",
@@ -143,16 +204,39 @@ class Pipe:
             description="If true, only free models will be available.",
         )
 
-    def __init__(self):
+    def __init__(self) -> None:
+        """Initialize the Pipe instance.
+
+        Sets up the pipe type and configuration valves. Prints a warning if the
+        OpenRouter API key is not configured.
+        """
         self.type = "manifold"  # Specifies this pipe provides multiple models
         self.valves = self.Valves()
         if not self.valves.OPENROUTER_API_KEY:
             print("Warning: OPENROUTER_API_KEY is not set in Valves.")
 
     def pipes(self) -> List[dict]:
-        """
-        Fetches available models from the OpenRouter API.
+        """Fetch available models from the OpenRouter API.
+
         This method is called by OpenWebUI to discover the models this pipe provides.
+        It retrieves the list of available models from OpenRouter, applies filtering
+        based on provider settings and free-only option, and formats them for
+        display in OpenWebUI.
+
+        Returns:
+            List[dict]: A list of dictionaries, each containing:
+                - "id": The model identifier from OpenRouter
+                - "name": The display name (with optional prefix) for OpenWebUI
+
+            If an error occurs or no models are found, returns a list with a single
+            error dictionary containing:
+                - "id": "error"
+                - "name": Error message describing what went wrong
+
+        Raises:
+            requests.exceptions.Timeout: If the API request times out.
+            requests.exceptions.HTTPError: If the API returns an HTTP error.
+            requests.exceptions.RequestException: If a network error occurs.
         """
         if not self.valves.OPENROUTER_API_KEY:
             return [
@@ -207,12 +291,8 @@ class Pipe:
                 model_name = model.get("name", model_id)
                 prefix = self.valves.MODEL_PREFIX or ""
 
-                # Get the provider and logo
-                provider = model_id.split("/")[0]
-                provider_logo = _get_provider_logo(provider.lower())
-
                 # Add the model to the list
-                models.append({"id": model_id, "name": f"{prefix}{model_name}", "logo": provider_logo})
+                models.append({"id": model_id, "name": f"{prefix}{model_name}"})
 
             if not models:
                 if self.valves.FREE_ONLY:
@@ -260,17 +340,32 @@ class Pipe:
             traceback.print_exc()
             return [{"id": "error", "name": f"Pipe Error: Unexpected error: {e}"}]
 
-    def pipe(self, body: dict) -> Union[str, Generator, Iterator]:
-        """
-        Processes incoming chat requests. This is the main function called by OpenWebUI
-        when a user interacts with a model provided by this pipe.
+    def pipe(self, body: dict) -> Union[str, Generator[str, None, None], Iterator[str]]:
+        """Process incoming chat requests from OpenWebUI.
+
+        This is the main function called by OpenWebUI when a user interacts with a
+        model provided by this pipe. It handles both streaming and non-streaming
+        requests, applies cache control if enabled, and processes the response
+        with citation handling.
 
         Args:
-            body: The request body, conforming to OpenAI chat completions format.
+            body: The request body conforming to OpenAI chat completions format.
+                Expected keys include:
+                - "model": The model identifier
+                - "messages": List of message objects
+                - "stream": Boolean indicating if streaming is requested
+                - "http_referer": Optional referer URL
+                - "x_title": Optional title for the request
 
         Returns:
-            Either a string (for non-streaming responses) or a generator/iterator
-            (for streaming responses).
+            Union[str, Generator[str, None, None], Iterator[str]]: 
+                - For non-streaming: A string containing the complete response
+                - For streaming: A generator that yields response chunks as strings
+                - Error messages are returned as strings
+
+        Note:
+            If the model ID contains a dot (.), it will be split and only the part
+            after the dot will be used as the actual model identifier.
         """
         if not self.valves.OPENROUTER_API_KEY:
             return "Pipe Error: OpenRouter API Key is not configured."
@@ -364,9 +459,39 @@ class Pipe:
             return f"Pipe Error: Failed to prepare request: {e}"
 
     def non_stream_response(
-        self, url, headers, payload, citation_inserter, citation_formatter, timeout
+        self,
+        url: str,
+        headers: dict,
+        payload: dict,
+        citation_inserter: Callable[[str, list[str]], str],
+        citation_formatter: Callable[[list[str]], str],
+        timeout: int,
     ) -> str:
-        """Handles non-streaming API requests."""
+        """Handle non-streaming API requests to OpenRouter.
+
+        Sends a POST request to the OpenRouter API and processes the complete
+        response. Handles reasoning tokens, citations, and formats the final
+        output appropriately.
+
+        Args:
+            url: The API endpoint URL for chat completions.
+            headers: HTTP headers including authorization and content type.
+            payload: The request payload containing model, messages, etc.
+            citation_inserter: Function to insert citations into text.
+            citation_formatter: Function to format citation lists.
+            timeout: Request timeout in seconds.
+
+        Returns:
+            str: The formatted response text including:
+                - Reasoning content (if present) wrapped in <think> tags
+                - Main content with citations inserted
+                - Formatted citation list at the end
+                - Error message if the request fails
+
+        Raises:
+            requests.exceptions.Timeout: If the request exceeds the timeout.
+            requests.exceptions.HTTPError: If the API returns an HTTP error.
+        """
         try:
             response = requests.post(
                 url, headers=headers, json=payload, timeout=timeout
@@ -414,9 +539,44 @@ class Pipe:
             return f"Pipe Error: Unexpected error processing response: {e}"
 
     def stream_response(
-        self, url, headers, payload, citation_inserter, citation_formatter, timeoutFD
+        self,
+        url: str,
+        headers: dict,
+        payload: dict,
+        citation_inserter: Callable[[str, list[str]], str],
+        citation_formatter: Callable[[list[str]], str],
+        timeout: int,
     ) -> Generator[str, None, None]:
-        """Handles streaming API requests using a generator."""
+        """Handle streaming API requests to OpenRouter.
+
+        Sends a streaming POST request to the OpenRouter API and yields response
+        chunks as they arrive. Handles reasoning tokens, content chunks, and
+        citations in real-time. Ensures proper formatting with reasoning tags and
+        appends citations at the end.
+
+        Args:
+            url: The API endpoint URL for chat completions.
+            headers: HTTP headers including authorization and content type.
+            payload: The request payload containing model, messages, etc.
+            citation_inserter: Function to insert citations into text chunks.
+            citation_formatter: Function to format citation lists.
+            timeout: Request timeout in seconds.
+
+        Yields:
+            str: Response chunks as they arrive from the API, including:
+                - Opening <think> tag when reasoning starts
+                - Reasoning chunks with citations inserted
+                - Closing </think> tag when switching to content
+                - Content chunks with citations inserted
+                - Formatted citation list at the end
+
+        Note:
+            The generator ensures that:
+            - Reasoning blocks are properly opened and closed
+            - Citations are inserted into each chunk as they arrive
+            - The citation list is yielded exactly once at the end
+            - Response is properly closed even if errors occur
+        """
         response = None
         try:
             response = requests.post(
