@@ -129,7 +129,7 @@ def citation_formatter(citations: list[str]) -> str:
         return ""
 
 
-def _get_provider_logo(provider: str) -> str:
+def get_provider_logo(provider: str) -> str:
     """Retrieve the logo URL for a given model provider.
 
     This function maps provider names to their corresponding logo URLs. It supports
@@ -145,9 +145,9 @@ def _get_provider_logo(provider: str) -> str:
             if the provider is not in the mapping.
 
     Example:
-        >>> _get_provider_logo("openai")
+        >>> get_provider_logo("openai")
         'https://assets.streamlinehq.com/image/...'
-        >>> _get_provider_logo("unknown")
+        >>> get_provider_logo("unknown")
         'https://via.placeholder.com/50x50/cccccc/000000?text=AI'
     """
     # Mapping of provider names (lowercase) to their logo URLs
@@ -320,19 +320,17 @@ class Pipe:
                     # Skip models without IDs (shouldn't happen, but defensive)
                     continue
 
+                provider = (
+                    model_id.split("/", 1)[0].lower()
+                    if "/" in model_id
+                    else model_id.lower()
+                )
+
                 # Apply Provider Filtering
                 # Only filter if provider list is specified (non-empty set)
                 if target_providers:
-                    # Extract provider name from model_id
-                    # Format is typically "provider/model-name" or just "model-name"
-                    # Split on "/" and take first part, or use entire ID if no "/"
-                    model_provider = (
-                        model_id.split("/", 1)[0].lower()
-                        if "/" in model_id
-                        else model_id.lower()
-                    )
                     # Check if provider is in the target list
-                    is_provider_in_filter_list = model_provider in target_providers
+                    is_provider_in_filter_list = provider in target_providers
 
                     # Determine if model should be kept based on filter mode:
                     # - Include mode (not invert): keep if provider is in list
@@ -342,8 +340,9 @@ class Pipe:
                     ) or (
                         not is_provider_in_filter_list and should_invert_provider_list
                     )
+
+                    # Skip this model - doesn't match filter criteria
                     if not should_keep_model:
-                        # Skip this model - doesn't match filter criteria
                         continue
 
                 # Apply Free Only Filtering
@@ -357,10 +356,16 @@ class Pipe:
                 # Apply optional prefix (e.g., "OR: " to distinguish from other sources)
                 model_name_prefix = self.valves.MODEL_PREFIX or ""
 
+                # Get provider logo for the model
+                logo = get_provider_logo(provider)
+
                 # Add filtered model to results list
-                # Format: {"id": "openrouter-model-id", "name": "prefix Display Name"}
                 filtered_models.append(
-                    {"id": model_id, "name": f"{model_name_prefix}{model_name}"}
+                    {
+                        "id": model_id,
+                        "name": f"{model_name_prefix}{model_name}",
+                        "meta": {"profile_image_url": logo},
+                    }
                 )
 
             # Handle case where no models passed the filters
