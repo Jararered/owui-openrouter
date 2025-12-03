@@ -829,6 +829,12 @@ class Pipe:
 
                     # Handle reasoning chunks (internal model thinking)
                     if reasoning_chunk:
+                        # Skip reasoning chunks if we've already closed the reasoning block
+                        # This prevents rendering another thinking block if the model outputs
+                        # more reasoning tokens after transitioning to content
+                        if has_closed_reasoning_block:
+                            continue
+                        
                         # Yield opening tag on first reasoning chunk
                         # This marks the start of reasoning content for UI rendering
                         if not has_yielded_reasoning_start_tag:
