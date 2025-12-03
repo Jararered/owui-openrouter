@@ -739,32 +739,16 @@ class Pipe:
         chunks as they arrive. Handles reasoning tokens, content chunks, and
         citations in real-time. Ensures proper formatting with reasoning tags and
         appends citations at the end.
-
-        Args:
-            api_endpoint_url: The API endpoint URL for chat completions.
-            request_headers: HTTP headers including authorization and content type.
-            request_payload: The request payload containing model, messages, etc.
-            citation_inserter: Function to insert citations into text chunks.
-            citation_formatter: Function to format citation lists.
-            request_timeout: Request timeout in seconds.
-
-        Yields:
-            str: Response chunks as they arrive from the API, including:
-                - Opening <think> tag when reasoning starts
-                - Reasoning chunks with citations inserted
-                - Closing </think> tag when switching to content
-                - Content chunks with citations inserted
-                - Formatted citation list at the end
-
-        Note:
-            The generator ensures that:
-            - Reasoning blocks are properly opened and closed
-            - Citations are inserted into each chunk as they arrive
-            - The citation list is yielded exactly once at the end
-            - Response is properly closed even if errors occur
         """
         # Initialize response variable for cleanup in finally block
         streaming_response = None
+        
+        # FIX: Initialize state variables BEFORE the try block.
+        # This ensures they exist if an exception occurs (e.g., connection error)
+        # before the code reaches the definition inside the try block.
+        latest_citation_urls: List[str] = []
+        has_yielded_citation_list = False
+        
         try:
             # Send streaming POST request - stream=True enables chunked response handling
             streaming_response = requests.post(
@@ -782,12 +766,6 @@ class Pipe:
             )
             has_closed_reasoning_block = (
                 False  # Track if we've closed the <think> block
-            )
-            latest_citation_urls: List[str] = (
-                []
-            )  # List of citations from the latest chunk
-            has_yielded_citation_list = (
-                False  # Ensure citation list is only yielded once at the end
             )
 
             # Process streaming response line by line
@@ -834,7 +812,7 @@ class Pipe:
                         # more reasoning tokens after transitioning to content
                         if has_closed_reasoning_block:
                             continue
-                        
+
                         # Yield opening tag on first reasoning chunk
                         # This marks the start of reasoning content for UI rendering
                         if not has_yielded_reasoning_start_tag:
@@ -869,11 +847,11 @@ class Pipe:
             if not has_yielded_citation_list:
                 yield citation_formatter(latest_citation_urls)
                 has_yielded_citation_list = True
+
         except requests.exceptions.Timeout:
             # Request exceeded timeout - yield error message
             yield f"Pipe Error: Request timed out"
             # Yield final citations if any were collected before timeout
-            # This ensures partial citations aren't lost on error
             if latest_citation_urls and not has_yielded_citation_list:
                 yield citation_formatter(latest_citation_urls)
         except requests.exceptions.HTTPError as http_error:
