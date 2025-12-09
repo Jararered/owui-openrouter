@@ -75,26 +75,22 @@ class Pipe:
             # Sort the models alphabetically by id
             models_data["data"].sort(key=lambda x: x["id"])
 
-            # Append pricing information to the models if not free model
-            if self.valves.SHOW_PRICING and not "free" in [model["id"] for model in models_data["data"]]:
+            # Append pricing information to the models 
+            if self.valves.SHOW_PRICING:
                 for model in models_data["data"]:
                     promptPerMillion = float(model['pricing']['prompt']) * 1000000
                     completionPerMillion = float(model['pricing']['completion']) * 1000000
-                    model["pricing"] = [
-                        {
-                            "prompt": f"${promptPerMillion:.4f}/m in",
-                            "completion": f"${completionPerMillion:.4f}/m out",
-                        }
-                    ]
+                    model["pricing"] = f"${promptPerMillion}/m in - ${completionPerMillion}/m out"
 
             # Transform OpenRouter models to OpenWebUI format
             # We map OpenRouter 'id' to both id and name, pre-pending the user's chosen prefix
             return [
                 {
                     "id": model["id"],
-                    "name": f"{self.valves.NAME_PREFIX}{model.get('id') } - {model.get('pricing', {}).get('prompt', '0')}",
+                    # Format: author/model ($3/m in - $6/m out)
+                    "name": f"{self.valves.NAME_PREFIX}{model['id'] } ({model['pricing']})",
                 }
-                for model in models_data.get("data", [])
+                for model in models_data["data"]
             ]
 
         except Exception as e:
