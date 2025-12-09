@@ -197,13 +197,12 @@ class Pipe:
             response.raise_for_status()
             
             model_data = response.json()["data"]
-            model_data = self._filter_models_by_authors(model_data)
+
+            # Sort models by id alphabetically
             model_data.sort(key=lambda model: model["id"])
 
-            # Format pricing for all models if enabled
-            if self.valves.SHOW_PRICING:
-                for model in model_data:
-                    model["pricing"] = self._format_model_pricing(model)
+            # Filter models by authors
+            model_data = self._filter_models_by_authors(model_data)
 
             # Transform to OpenWebUI format
             return [
