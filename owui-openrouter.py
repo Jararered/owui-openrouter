@@ -1,5 +1,5 @@
 """
-title: owui-openrouter
+title: openrouter
 author(s): jararered + gemini-3-pro
 author_url(s): https://github.com/jararered/owui-openrouter + https://deepmind.google/models/gemini/pro/
 version: 0.1.0
@@ -31,6 +31,10 @@ class Pipe:
         MODEL_AUTHORS: str = Field(
             default="openai,anthropic,google,mistral,meta",
             description="Optional: Comma-separated list of model authors to filter by.",
+        )
+        SHOW_PRICING: bool = Field(
+            default=True,
+            description="Optional: Whether to show pricing information for the models.",
         )
 
     def __init__(self):
@@ -65,15 +69,30 @@ class Pipe:
                 models_data["data"] = [
                     model
                     for model in models_data["data"]
-                    if model["author"] in self.valves.MODEL_AUTHORS.split(",")
+                    if model["id"].split("/")[0] in self.valves.MODEL_AUTHORS.split(",")
                 ]
+
+            # Sort the models alphabetically by id
+            models_data["data"].sort(key=lambda x: x["id"])
+
+            # Append pricing information to the models if not free model
+            if self.valves.SHOW_PRICING and not "free" in [model["id"] for model in models_data["data"]]:
+                for model in models_data["data"]:
+                    promptPerMillion = float(model['pricing']['prompt']) * 1000000
+                    completionPerMillion = float(model['pricing']['completion']) * 1000000
+                    model["pricing"] = [
+                        {
+                            "prompt": f"${promptPerMillion:.4f}/m in",
+                            "completion": f"${completionPerMillion:.4f}/m out",
+                        }
+                    ]
 
             # Transform OpenRouter models to OpenWebUI format
             # We map OpenRouter 'id' to both id and name, pre-pending the user's chosen prefix
             return [
                 {
                     "id": model["id"],
-                    "name": f"{self.valves.NAME_PREFIX}{model.get('id')}",
+                    "name": f"{self.valves.NAME_PREFIX}{model.get('id') } - {model.get('pricing', {}).get('prompt', '0')}",
                 }
                 for model in models_data.get("data", [])
             ]
