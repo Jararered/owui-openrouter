@@ -10,6 +10,8 @@ import requests
 from typing import List, Union, Iterator
 from decimal import Decimal, ROUND_HALF_UP
 
+from urllib3 import response
+
 def ErrorModel(message: str) -> dict:
     return {
         "id": "error",
@@ -97,24 +99,25 @@ class Pipe:
             }
 
             # Fetch models from OpenRouter
-            r = requests.get(f"{self.api_base}/models", headers=headers)
-            r.raise_for_status()
-            models_data = r.json()
+            response = requests.get(f"{self.api_base}/models", headers=headers)
+            response.raise_for_status()
+            modelDataJSON = response.json()
+            modelData = modelDataJSON["data"]
 
             # Filter models by authors if provided
             if self.valves.MODEL_AUTHORS:
-                models_data["data"] = [
+                modelData = [
                     model
-                    for model in models_data["data"]
-                    if model["canonical_slug"].split("/")[0] in self.valves.MODEL_AUTHORS.split(",")
+                    for model in modelData
+                    if model["id"].split("/")[0] in self.valves.MODEL_AUTHORS.split(",")
                 ]
 
             # Sort the models alphabetically by id
-            models_data["data"].sort(key=lambda model: model["canonical_slug"])
+            modelData.sort(key=lambda model: model["id"])
 
             # Append pricing information to the models 
             if self.valves.SHOW_PRICING:
-                for model in models_data["data"]:
+                for model in modelData:
                     prompt_price = self.format_price(float(model['pricing']['prompt']))
                     completion_price = self.format_price(float(model['pricing']['completion']))
                     if prompt_price == "0" and completion_price == "0":
@@ -126,11 +129,11 @@ class Pipe:
             # We map OpenRouter 'id' to both id and name, pre-pending the user's chosen prefix
             return [
                 {
-                    "id": model["canonical_slug"],
+                    "id": model["id"],
                     # Format: author/model ($3/m in - $6/m out)
-                    "name": f"{self.valves.NAME_PREFIX}{model['canonical_slug'] } ({model['pricing']})",
+                    "name": f"{self.valves.NAME_PREFIX}{model['id'] } ({model['pricing']})",
                 }
-                for model in models_data["data"]
+                for model in modelData
             ]
 
         except Exception as e:
@@ -163,7 +166,7 @@ class Pipe:
         payload = {**body, "model": model_id}
 
         try:
-            r = requests.post(
+            response = response.post(
                 url=f"{self.api_base}/chat/completions",
                 json=payload,
                 headers=headers,
@@ -172,17 +175,17 @@ class Pipe:
 
             # Handle pre-stream errors (errors before any tokens are sent)
             # According to OpenRouter docs, these return standard JSON error responses
-            if not r.ok:
+            if not response.ok:
                 try:
-                    error_data = r.json()
+                    error_data = response.json()
                     # Return error in OpenRouter format
                     return error_data
                 except:
                     # If response isn't JSON, return generic error
                     return {
                         "error": {
-                            "code": r.status_code,
-                            "message": f"HTTP {r.status_code}: {r.reason}"
+                            "code": response.status_code,
+                            "message": f"HTTP {response.status_code}: {response.reason}"
                         }
                     }
 
@@ -191,9 +194,9 @@ class Pipe:
                 # SSE comments (like ": OPENROUTER PROCESSING") will be included
                 # and should be handled by the client per SSE spec
                 # Mid-stream errors will be in SSE format and handled by client
-                return (self.filter_line_comments(line) for line in r.iter_lines())
+                return (self.filter_line_comments(line) for line in response.iter_lines())
             else:
-                return r.json()
+                return response.json()
 
         except requests.exceptions.RequestException as e:
             # Handle network/request errors
