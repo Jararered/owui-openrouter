@@ -104,7 +104,10 @@ class Pipe:
                 for model in models_data["data"]:
                     prompt_price = self.format_price(float(model['pricing']['prompt']))
                     completion_price = self.format_price(float(model['pricing']['completion']))
-                    model["pricing"] = f"${prompt_price}/m in - ${completion_price}/m out"
+                    if prompt_price == "0" and completion_price == "0":
+                        model["pricing"] = "free"
+                    else:
+                        model["pricing"] = f"${prompt_price}/m in - ${completion_price}/m out"
 
             # Transform OpenRouter models to OpenWebUI format
             # We map OpenRouter 'id' to both id and name, pre-pending the user's chosen prefix
