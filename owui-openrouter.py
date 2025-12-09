@@ -154,15 +154,47 @@ class Pipe:
                 url=f"{self.api_base}/chat/completions",
                 json=payload,
                 headers=headers,
-                stream=True,
+                stream=body.get("stream", False),
             )
 
-            r.raise_for_status()
+            # Handle pre-stream errors (errors before any tokens are sent)
+            # According to OpenRouter docs, these return standard JSON error responses
+            if not r.ok:
+                try:
+                    error_data = r.json()
+                    # Return error in OpenRouter format
+                    return error_data
+                except:
+                    # If response isn't JSON, return generic error
+                    return {
+                        "error": {
+                            "code": r.status_code,
+                            "message": f"HTTP {r.status_code}: {r.reason}"
+                        }
+                    }
 
             if body.get("stream", False):
+                # Return iterator for streaming
+                # SSE comments (like ": OPENROUTER PROCESSING") will be included
+                # and should be handled by the client per SSE spec
+                # Mid-stream errors will be in SSE format and handled by client
                 return r.iter_lines()
             else:
                 return r.json()
 
+        except requests.exceptions.RequestException as e:
+            # Handle network/request errors
+            return {
+                "error": {
+                    "code": "request_error",
+                    "message": str(e)
+                }
+            }
         except Exception as e:
-            return f"Error: {e}"
+            # Handle any other unexpected errors
+            return {
+                "error": {
+                    "code": "unknown_error",
+                    "message": str(e)
+                }
+            }
