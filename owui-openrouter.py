@@ -42,10 +42,23 @@ class Pipe:
             default=True,
             description="Optional: Whether to show pricing information for the models.",
         )
+        FILTER_STREAM_COMMENTS: bool = Field(
+            default=True,
+            description="Optional: Whether to filter out stream comments (like ': OPENROUTER PROCESSING') from the response.",
+        )
 
     def __init__(self):
         self.valves = self.Valves()
         self.api_base = "https://openrouter.ai/api/v1"
+
+    def filter_line_comments(self, line: bytes) -> bytes:
+        """
+        Filters out stream comments (like ': OPENROUTER PROCESSING') from the response.
+        Needs to be bytes to be compatible with the OpenWebUI SSE spec
+        """
+        if self.valves.FILTER_STREAM_COMMENTS:
+            return line.replace(b": OPENROUTER PROCESSING", b"")
+        return line
 
     def format_price(self, price_per_token: float) -> str:
         """
@@ -178,7 +191,7 @@ class Pipe:
                 # SSE comments (like ": OPENROUTER PROCESSING") will be included
                 # and should be handled by the client per SSE spec
                 # Mid-stream errors will be in SSE format and handled by client
-                return r.iter_lines()
+                return (self.filter_line_comments(line) for line in r.iter_lines())
             else:
                 return r.json()
 
