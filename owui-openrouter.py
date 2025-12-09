@@ -10,13 +10,13 @@ import requests
 from typing import List, Union, Iterator
 from decimal import Decimal, ROUND_HALF_UP
 
-from urllib3 import response
 
 def ErrorModel(message: str) -> dict:
     return {
         "id": "error",
         "name": message,
     }
+
 
 class Pipe:
     class Valves(BaseModel):
@@ -166,7 +166,7 @@ class Pipe:
         payload = {**body, "model": model_id}
 
         try:
-            response = response.post(
+            response = requests.post(
                 url=f"{self.api_base}/chat/completions",
                 json=payload,
                 headers=headers,
