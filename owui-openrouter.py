@@ -8,6 +8,7 @@ version: 0.1.0
 from pydantic import BaseModel, Field
 import requests
 from typing import List, Union, Iterator
+from decimal import Decimal, ROUND_HALF_UP
 
 
 class Pipe:
@@ -40,6 +41,27 @@ class Pipe:
     def __init__(self):
         self.valves = self.Valves()
         self.api_base = "https://openrouter.ai/api/v1"
+
+    def format_price(self, price_per_token: float) -> str:
+        """
+        Formats a price per token to a price per million tokens.
+        - Rounds repeating 9's up (e.g., 2.999 -> 3.0)
+        - Displays whole numbers as integers (e.g., 3.0 -> 3)
+        - Displays decimals with up to 2 decimal places
+        """
+        # Use Decimal for precise decimal arithmetic to avoid floating point precision issues
+        price_per_million = Decimal(str(price_per_token)) * Decimal('1000000')
+        
+        # Round to 2 decimal places using banker's rounding (rounds 0.5 up)
+        rounded = price_per_million.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        
+        # If it's a whole number, display as integer
+        if rounded == rounded.to_integral_value():
+            return str(int(rounded))
+        
+        # Otherwise, display with up to 2 decimal places, removing trailing zeros
+        formatted = str(rounded)
+        return formatted.rstrip('0').rstrip('.')
 
     def pipes(self) -> List[dict]:
         """
@@ -78,9 +100,9 @@ class Pipe:
             # Append pricing information to the models 
             if self.valves.SHOW_PRICING:
                 for model in models_data["data"]:
-                    promptPerMillion = float(model['pricing']['prompt']) * 1000000
-                    completionPerMillion = float(model['pricing']['completion']) * 1000000
-                    model["pricing"] = f"${promptPerMillion}/m in - ${completionPerMillion}/m out"
+                    prompt_price = self.format_price(float(model['pricing']['prompt']))
+                    completion_price = self.format_price(float(model['pricing']['completion']))
+                    model["pricing"] = f"${prompt_price}/m in - ${completion_price}/m out"
 
             # Transform OpenRouter models to OpenWebUI format
             # We map OpenRouter 'id' to both id and name, pre-pending the user's chosen prefix
