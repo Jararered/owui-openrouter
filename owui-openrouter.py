@@ -10,6 +10,11 @@ import requests
 from typing import List, Union, Iterator
 from decimal import Decimal, ROUND_HALF_UP
 
+def ErrorModel(message: str) -> dict:
+    return {
+        "id": "error",
+        "name": message,
+    }
 
 class Pipe:
     class Valves(BaseModel):
@@ -30,7 +35,7 @@ class Pipe:
             description="Optional: Your site name for OpenRouter rankings (X-Title header).",
         )
         MODEL_AUTHORS: str = Field(
-            default="openai,anthropic,google,mistral,meta",
+            default="anthropic,google,openai,mistralai,meta-llama,x-ai",
             description="Optional: Comma-separated list of model authors to filter by.",
         )
         SHOW_PRICING: bool = Field(
@@ -47,13 +52,13 @@ class Pipe:
         Formats a price per token to a price per million tokens.
         - Rounds repeating 9's up (e.g., 2.999 -> 3.0)
         - Displays whole numbers as integers (e.g., 3.0 -> 3)
-        - Displays decimals with up to 2 decimal places
+        - Displays decimals with up to 3 decimal places
         """
         # Use Decimal for precise decimal arithmetic to avoid floating point precision issues
         price_per_million = Decimal(str(price_per_token)) * Decimal('1000000')
         
-        # Round to 2 decimal places using banker's rounding (rounds 0.5 up)
-        rounded = price_per_million.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        # Round to 3 decimal places using banker's rounding (rounds 0.5 up)
+        rounded = price_per_million.quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
         
         # If it's a whole number, display as integer
         if rounded == rounded.to_integral_value():
@@ -69,10 +74,7 @@ class Pipe:
         """
         if not self.valves.OPENROUTER_API_KEY:
             return [
-                {
-                    "id": "error",
-                    "name": "Error: OpenRouter API Key not set in Valves.",
-                }
+                ErrorModel("Error: OpenRouter API Key not set in Valves.")
             ]
 
         try:
@@ -91,11 +93,11 @@ class Pipe:
                 models_data["data"] = [
                     model
                     for model in models_data["data"]
-                    if model["id"].split("/")[0] in self.valves.MODEL_AUTHORS.split(",")
+                    if model["canonical_slug"].split("/")[0] in self.valves.MODEL_AUTHORS.split(",")
                 ]
 
             # Sort the models alphabetically by id
-            models_data["data"].sort(key=lambda x: x["id"])
+            models_data["data"].sort(key=lambda model: model["canonical_slug"])
 
             # Append pricing information to the models 
             if self.valves.SHOW_PRICING:
@@ -108,19 +110,16 @@ class Pipe:
             # We map OpenRouter 'id' to both id and name, pre-pending the user's chosen prefix
             return [
                 {
-                    "id": model["id"],
+                    "id": model["canonical_slug"],
                     # Format: author/model ($3/m in - $6/m out)
-                    "name": f"{self.valves.NAME_PREFIX}{model['id'] } ({model['pricing']})",
+                    "name": f"{self.valves.NAME_PREFIX}{model['canonical_slug'] } ({model['pricing']})",
                 }
                 for model in models_data["data"]
             ]
 
         except Exception as e:
             return [
-                {
-                    "id": "error",
-                    "name": f"Error fetching models: {str(e)}",
-                }
+                ErrorModel(f"Error fetching models: {str(e)}")
             ]
 
     def pipe(self, body: dict, __user__: dict) -> Union[str, Iterator[str]]:
