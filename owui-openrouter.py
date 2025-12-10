@@ -7,11 +7,12 @@ version: 0.1.0
 
 from pydantic import BaseModel, Field
 import requests
-from typing import List, Union, Iterator
+from typing import List, Union, Iterator, Optional
 from decimal import Decimal, ROUND_HALF_UP
 
 
 def ErrorModel(message: str) -> dict:
+    """Creates an error model dictionary for display in OpenWebUI."""
     return {
         "id": "error",
         "name": message,
@@ -57,14 +58,50 @@ class Pipe:
         self.valves = self.Valves()
         self.api_base = "https://openrouter.ai/api/v1"
 
-    def filter_line_comments(self, line: bytes) -> bytes:
+    def _get_auth_headers(self) -> dict:
+        """Creates authentication headers for API requests."""
+        return {
+            "Authorization": f"Bearer {self.valves.OPENROUTER_API_KEY}",
+            "Content-Type": "application/json",
+        }
+
+    def _get_request_headers(self) -> dict:
+        """Creates complete headers for chat completion requests."""
+        headers = self._get_auth_headers()
+        headers.update({
+            "HTTP-Referer": self.valves.YOUR_SITE_URL,
+            "X-Title": self.valves.YOUR_SITE_NAME,
+        })
+        return headers
+
+    def _extract_model_id(self, model_string: str) -> str:
         """
-        Filters out stream comments (like ': OPENROUTER PROCESSING') from the response.
-        Needs to be bytes to be compatible with the OpenWebUI SSE spec
+        Extracts the actual OpenRouter model ID from the model string.
+        
+        The model ID usually comes in as "function_file_name.model_id"
+        Example: "openrouter_pipe.google/gemma-7b" -> "google/gemma-7b"
         """
-        if self.valves.FILTER_STREAM_COMMENTS:
-            return line.replace(b": OPENROUTER PROCESSING", b"")
-        return line
+        if "." in model_string:
+            return model_string[model_string.find(".") + 1:]
+        return model_string
+
+    def _filter_models_by_authors(self, models: List[dict]) -> List[dict]:
+        """Filters models by the specified authors."""
+        if not self.valves.MODEL_AUTHORS:
+            return models
+        
+        authors = [author.strip() for author in self.valves.MODEL_AUTHORS.split(",")]
+        return [
+            model
+            for model in models
+            if model["id"].split("/")[0] in authors
+        ]
+
+    def _format_pricing_string(self, prompt_price: str, completion_price: str) -> str:
+        """Formats pricing information as a display string."""
+        if prompt_price == "0" and completion_price == "0":
+            return "free"
+        return f"${prompt_price}/m in - ${completion_price}/m out"
 
     def format_price(self, price_per_token: float) -> str:
         """
@@ -87,86 +124,120 @@ class Pipe:
         formatted = str(rounded)
         return formatted.rstrip('0').rstrip('.')
 
+    def _format_model_pricing(self, model: dict) -> str:
+        """Formats pricing information for a model."""
+        prompt_price = self.format_price(float(model['pricing']['prompt']))
+        completion_price = self.format_price(float(model['pricing']['completion']))
+        return self._format_pricing_string(prompt_price, completion_price)
+
+    def _transform_model_to_openwebui_format(self, model: dict) -> dict:
+        """Transforms an OpenRouter model to OpenWebUI format."""
+        pricing_display = self._format_model_pricing(model) if self.valves.SHOW_PRICING else ""
+        name = f"{self.valves.NAME_PREFIX}{model['id']}"
+        if pricing_display:
+            name = f"{name} ({pricing_display})"
+        
+        return {
+            "id": model["id"],
+            "name": name,
+        }
+
+    def filter_stream_line(self, line: bytes) -> bytes:
+        """
+        Filters out stream comments from SSE response lines.
+        
+        This is an abstract filter function that can be extended to filter
+        different types of stream content. Needs to be bytes to be compatible
+        with the OpenWebUI SSE spec.
+        """
+        if not self.valves.FILTER_STREAM_COMMENTS:
+            return line
+        
+        # Filter out OpenRouter processing comments
+        filtered = line.replace(b": OPENROUTER PROCESSING", b"")
+        return filtered
+
+    def _handle_api_error(self, response: requests.Response) -> dict:
+        """Handles API error responses from OpenRouter."""
+        try:
+            error_data = response.json()
+            return error_data
+        except (ValueError, requests.exceptions.JSONDecodeError):
+            # If response isn't JSON, return generic error
+            return {
+                "error": {
+                    "code": response.status_code,
+                    "message": f"HTTP {response.status_code}: {response.reason}"
+                }
+            }
+
+    def _handle_request_exception(self, exception: Exception) -> dict:
+        """Handles request exceptions with appropriate error formatting."""
+        if isinstance(exception, requests.exceptions.RequestException):
+            return {
+                "error": {
+                    "code": "request_error",
+                    "message": str(exception)
+                }
+            }
+        return {
+            "error": {
+                "code": "unknown_error",
+                "message": str(exception)
+            }
+        }
+
     def pipes(self) -> List[dict]:
         """
         Fetches the list of available models from OpenRouter.
+        Returns a list of model dictionaries in OpenWebUI format.
         """
         if not self.valves.OPENROUTER_API_KEY:
-            return [
-                ErrorModel("Error: OpenRouter API Key not set in Valves.")
-            ]
+            return [ErrorModel("Error: OpenRouter API Key not set in Valves.")]
 
         try:
-            headers = {
-                "Authorization": f"Bearer {self.valves.OPENROUTER_API_KEY}",
-                "Content-Type": "application/json",
-            }
-
-            # Fetch models from OpenRouter
+            headers = self._get_auth_headers()
             response = requests.get(f"{self.api_base}/models", headers=headers)
             response.raise_for_status()
-            modelDataJSON = response.json()
-            modelData = modelDataJSON["data"]
+            
+            model_data = response.json()["data"]
 
-            # Filter models by authors if provided
-            if self.valves.MODEL_AUTHORS:
-                modelData = [
-                    model
-                    for model in modelData
-                    if model["id"].split("/")[0] in self.valves.MODEL_AUTHORS.split(",")
-                ]
+            # Sort models by id alphabetically
+            model_data.sort(key=lambda model: model["id"])
 
-            # Sort the models alphabetically by id
-            modelData.sort(key=lambda model: model["id"])
+            # Filter models by authors
+            model_data = self._filter_models_by_authors(model_data)
 
-            # Append pricing information to the models 
-            if self.valves.SHOW_PRICING:
-                for model in modelData:
-                    prompt_price = self.format_price(float(model['pricing']['prompt']))
-                    completion_price = self.format_price(float(model['pricing']['completion']))
-                    if prompt_price == "0" and completion_price == "0":
-                        model["pricing"] = "free"
-                    else:
-                        model["pricing"] = f"${prompt_price}/m in - ${completion_price}/m out"
-
-            # Transform OpenRouter models to OpenWebUI format
-            # We map OpenRouter 'id' to both id and name, pre-pending the user's chosen prefix
+            # Transform to OpenWebUI format
             return [
-                {
-                    "id": model["id"],
-                    # Format: author/model ($3/m in - $6/m out)
-                    "name": f"{self.valves.NAME_PREFIX}{model['id'] } ({model['pricing']})",
-                }
-                for model in modelData
+                self._transform_model_to_openwebui_format(model)
+                for model in model_data
             ]
 
+        except requests.exceptions.RequestException as e:
+            return [ErrorModel(f"Error fetching models: {str(e)}")]
         except Exception as e:
-            return [
-                ErrorModel(f"Error fetching models: {str(e)}")
-            ]
+            return [ErrorModel(f"Error fetching models: {str(e)}")]
 
-    def pipe(self, body: dict, __user__: dict) -> Union[str, Iterator[str]]:
+    def pipe(self, body: dict, __user__: dict) -> Union[str, Iterator[bytes], dict]:
         """
         Handles the chat completion request to OpenRouter.
+        
+        This is the main pipe function that processes requests and returns
+        either streaming responses or complete JSON responses.
         """
         print(f"Pipe called for model: {body.get('model')}")
 
-        headers = {
-            "Authorization": f"Bearer {self.valves.OPENROUTER_API_KEY}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": self.valves.YOUR_SITE_URL,
-            "X-Title": self.valves.YOUR_SITE_NAME,
-        }
+        if not self.valves.OPENROUTER_API_KEY:
+            return {
+                "error": {
+                    "code": "missing_api_key",
+                    "message": "OpenRouter API Key not set in Valves."
+                }
+            }
 
-        # The model ID usually comes in as "function_file_name.model_id"
-        # We need to strip the prefix to get the actual OpenRouter model ID
-        # Example: "openrouter_pipe.google/gemma-7b" -> "google/gemma-7b"
-        if "." in body["model"]:
-            model_id = body["model"][body["model"].find(".") + 1 :]
-        else:
-            model_id = body["model"]
-
-        # Update the body with the clean model ID
+        headers = self._get_request_headers()
+        model_id = self._extract_model_id(body["model"])
         payload = {**body, "model": model_id}
         
         # Add preset if configured
@@ -182,43 +253,19 @@ class Pipe:
             )
 
             # Handle pre-stream errors (errors before any tokens are sent)
-            # According to OpenRouter docs, these return standard JSON error responses
             if not response.ok:
-                try:
-                    error_data = response.json()
-                    # Return error in OpenRouter format
-                    return error_data
-                except:
-                    # If response isn't JSON, return generic error
-                    return {
-                        "error": {
-                            "code": response.status_code,
-                            "message": f"HTTP {response.status_code}: {response.reason}"
-                        }
-                    }
+                return self._handle_api_error(response)
 
             if body.get("stream", False):
-                # Return iterator for streaming
-                # SSE comments (like ": OPENROUTER PROCESSING") will be included
-                # and should be handled by the client per SSE spec
-                # Mid-stream errors will be in SSE format and handled by client
-                return (self.filter_line_comments(line) for line in response.iter_lines())
+                # Return iterator for streaming with filtered lines
+                return (
+                    self.filter_stream_line(line)
+                    for line in response.iter_lines()
+                )
             else:
                 return response.json()
 
         except requests.exceptions.RequestException as e:
-            # Handle network/request errors
-            return {
-                "error": {
-                    "code": "request_error",
-                    "message": str(e)
-                }
-            }
+            return self._handle_request_exception(e)
         except Exception as e:
-            # Handle any other unexpected errors
-            return {
-                "error": {
-                    "code": "unknown_error",
-                    "message": str(e)
-                }
-            }
+            return self._handle_request_exception(e)
