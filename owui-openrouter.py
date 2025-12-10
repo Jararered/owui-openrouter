@@ -48,6 +48,10 @@ class Pipe:
             default=True,
             description="Optional: Whether to filter out stream comments (like ': OPENROUTER PROCESSING') from the response.",
         )
+        PRESET: str = Field(
+            default="",
+            description="Optional: OpenRouter preset string (e.g., '@preset/lightning'). Set up presets at openrouter.ai.",
+        )
 
     def __init__(self):
         self.valves = self.Valves()
@@ -164,6 +168,10 @@ class Pipe:
 
         # Update the body with the clean model ID
         payload = {**body, "model": model_id}
+        
+        # Add preset if configured
+        if self.valves.PRESET:
+            payload["preset"] = self.valves.PRESET
 
         try:
             response = requests.post(
