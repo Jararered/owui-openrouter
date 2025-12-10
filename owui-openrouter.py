@@ -25,33 +25,33 @@ class Pipe:
             default="",
             description="Your OpenRouter API Key. Get one at openrouter.ai/keys",
         )
-        NAME_PREFIX: str = Field(
+        OPENROUTER_PRESET: str = Field(
             default="",
-            description="Prefix to be added before model names (e.g., OpenRouter/google/gemma).",
+            description="Optional: OpenRouter preset string (e.g., '@preset/lightning'). Set up presets at openrouter.ai.",
         )
-        YOUR_SITE_URL: str = Field(
-            default="https://openwebui.com",
-            description="Optional: Your site URL for OpenRouter rankings (HTTP-Referer header).",
+        SHOW_OPENROUTER_MODEL_PRICING: bool = Field(
+            default=True,
+            description="Optional: Whether to show pricing information for the models.",
         )
-        YOUR_SITE_NAME: str = Field(
-            default="OpenWebUI",
-            description="Optional: Your site name for OpenRouter rankings (X-Title header).",
+        STRIP_OPENROUTER_STREAM_COMMENTS: bool = Field(
+            default=True,
+            description="Optional: Whether to filter out stream comments (like ': OPENROUTER PROCESSING') from the response.",
         )
         MODEL_AUTHORS: str = Field(
             default="anthropic,google,openai,mistralai,meta-llama,x-ai",
             description="Optional: Comma-separated list of model authors to filter by.",
         )
-        SHOW_PRICING: bool = Field(
-            default=True,
-            description="Optional: Whether to show pricing information for the models.",
-        )
-        FILTER_STREAM_COMMENTS: bool = Field(
-            default=True,
-            description="Optional: Whether to filter out stream comments (like ': OPENROUTER PROCESSING') from the response.",
-        )
-        PRESET: str = Field(
+        NAME_PREFIX: str = Field(
             default="",
-            description="Optional: OpenRouter preset string (e.g., '@preset/lightning'). Set up presets at openrouter.ai.",
+            description="Prefix to be added before model names (e.g., OpenRouter/google/gemma).",
+        )
+        APPLICATION_NAME: str = Field(
+            default="OpenWebUI",
+            description="Optional: Your site name for OpenRouter rankings (X-Title header).",
+        )
+        APPLICATION_URL: str = Field(
+            default="https://openwebui.com",
+            description="Optional: Your site URL for OpenRouter rankings (HTTP-Referer header).",
         )
 
     def __init__(self):
@@ -69,8 +69,8 @@ class Pipe:
         """Creates complete headers for chat completion requests."""
         headers = self._get_auth_headers()
         headers.update({
-            "HTTP-Referer": self.valves.YOUR_SITE_URL,
-            "X-Title": self.valves.YOUR_SITE_NAME,
+            "HTTP-Referer": self.valves.APPLICATION_URL,
+            "X-Title": self.valves.APPLICATION_NAME,
         })
         return headers
 
@@ -132,7 +132,7 @@ class Pipe:
 
     def _transform_model_to_openwebui_format(self, model: dict) -> dict:
         """Transforms an OpenRouter model to OpenWebUI format."""
-        pricing_display = self._format_model_pricing(model) if self.valves.SHOW_PRICING else ""
+        pricing_display = self._format_model_pricing(model) if self.valves.SHOW_OPENROUTER_MODEL_PRICING else ""
         name = f"{self.valves.NAME_PREFIX}{model['id']}"
         if pricing_display:
             name = f"{name} ({pricing_display})"
@@ -150,7 +150,7 @@ class Pipe:
         different types of stream content. Needs to be bytes to be compatible
         with the OpenWebUI SSE spec.
         """
-        if not self.valves.FILTER_STREAM_COMMENTS:
+        if not self.valves.STRIP_OPENROUTER_STREAM_COMMENTS:
             return line
         
         # Filter out OpenRouter processing comments
@@ -241,8 +241,8 @@ class Pipe:
         payload = {**body, "model": model_id}
         
         # Add preset if configured
-        if self.valves.PRESET:
-            payload["preset"] = self.valves.PRESET
+        if self.valves.OPENROUTER_PRESET:
+            payload["preset"] = self.valves.OPENROUTER_PRESET
 
         try:
             response = requests.post(
