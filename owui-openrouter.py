@@ -5,9 +5,10 @@ author_url(s): https://github.com/jararered/owui-openrouter + https://deepmind.g
 version: 0.1.0
 """
 
-from pydantic import BaseModel, Field
 import requests
-from typing import List, Union, Iterator, Optional
+
+from pydantic import BaseModel, Field
+from typing import List, Union, Iterator
 from decimal import Decimal, ROUND_HALF_UP
 
 
@@ -21,6 +22,11 @@ def ErrorModel(message: str) -> dict:
 
 class Pipe:
     class Valves(BaseModel):
+        """Valves class."""
+        OPENROUTER_API_BASE_URL: str = Field(
+            default="https://openrouter.ai/api/v1",
+            description="Base URL for accessing OpenRouter API endpoints.",
+        )
         OPENROUTER_API_KEY: str = Field(
             default="",
             description="Your OpenRouter API Key. Get one at openrouter.ai/keys",
@@ -56,7 +62,6 @@ class Pipe:
 
     def __init__(self):
         self.valves = self.Valves()
-        self.api_base = "https://openrouter.ai/api/v1"
 
     def _get_auth_headers(self) -> dict:
         """Creates authentication headers for API requests."""
@@ -66,13 +71,16 @@ class Pipe:
         }
 
     def _get_request_headers(self) -> dict:
-        """Creates complete headers for chat completion requests."""
-        headers = self._get_auth_headers()
-        headers.update({
+        """Creates complete headers for chat completion requests.
+        
+        Returns:
+            dict: complete headers for chat completion requests
+        """
+        return {
+            **self._get_auth_headers(),
             "HTTP-Referer": self.valves.APPLICATION_URL,
             "X-Title": self.valves.APPLICATION_NAME,
-        })
-        return headers
+        }
 
     def _extract_model_id(self, model_string: str) -> str:
         """
