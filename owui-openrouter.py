@@ -12,14 +12,6 @@ from typing import List, Union, Iterator
 from decimal import Decimal, ROUND_HALF_UP
 
 
-def ErrorModel(message: str) -> dict:
-    """Creates an error model dictionary for display in OpenWebUI."""
-    return {
-        "id": "error",
-        "name": message,
-    }
-
-
 class Pipe:
     class Valves(BaseModel):
         """Valves class."""
@@ -201,7 +193,7 @@ class Pipe:
         Returns a list of model dictionaries in OpenWebUI format.
         """
         if not self.valves.OPENROUTER_API_KEY:
-            return [ErrorModel("Error: OpenRouter API Key not set in Valves.")]
+            return [{"id": "error", "name": "Error: OpenRouter API Key not set in Valves."}]
 
         try:
             headers = self._get_auth_headers()
@@ -223,9 +215,9 @@ class Pipe:
             ]
 
         except requests.exceptions.RequestException as e:
-            return [ErrorModel(f"Error fetching models: {str(e)}")]
+            return [{"id": "error", "name": f"Error fetching models: {str(e)}"}]
         except Exception as e:
-            return [ErrorModel(f"Error fetching models: {str(e)}")]
+            return [{"id": "error", "name": f"Error fetching models: {str(e)}"}]
 
     def pipe(self, body: dict, __user__: dict) -> Union[str, Iterator[bytes], dict]:
         """
