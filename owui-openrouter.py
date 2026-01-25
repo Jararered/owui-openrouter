@@ -5,20 +5,22 @@ author_url(s): https://github.com/jararered/owui-openrouter + https://deepmind.g
 version: 0.1.0
 """
 
-import requests
-
 from pydantic import BaseModel, Field
-from typing import List, Union, Iterator
+import requests
+from typing import List, Union, Iterator, Optional
 from decimal import Decimal, ROUND_HALF_UP
+
+
+def ErrorModel(message: str) -> dict:
+    """Creates an error model dictionary for display in OpenWebUI."""
+    return {
+        "id": "error",
+        "name": message,
+    }
 
 
 class Pipe:
     class Valves(BaseModel):
-        """Valves class."""
-        OPENROUTER_API_BASE_URL: str = Field(
-            default="https://openrouter.ai/api/v1",
-            description="Base URL for accessing OpenRouter API endpoints.",
-        )
         OPENROUTER_API_KEY: str = Field(
             default="",
             description="Your OpenRouter API Key. Get one at openrouter.ai/keys",
@@ -26,6 +28,10 @@ class Pipe:
         OPENROUTER_PRESET: str = Field(
             default="",
             description="Optional: OpenRouter preset string (e.g., '@preset/lightning'). Set up presets at openrouter.ai.",
+        )
+        OPENROUTER_WEB_SEARCH: bool = Field(
+            default=False,
+            description="Optional: Whether to use OpenRouter's websearch functionality for all models. This comes at an additional cost listed on OpenRouter.",
         )
         SHOW_OPENROUTER_MODEL_PRICING: bool = Field(
             default=True,
@@ -36,8 +42,8 @@ class Pipe:
             description="Optional: Whether to filter out stream comments (like ': OPENROUTER PROCESSING') from the response.",
         )
         MODEL_AUTHORS: str = Field(
-            default="anthropic,google,openai,mistralai,meta-llama,x-ai",
-            description="Optional: Comma-separated list of model authors to filter by.",
+            default="",
+            description="Optional: Comma-separated list of model authors to filter by. (e.g. anthropic,google,openai,mistralai,meta-llama,x-ai)",
         )
         NAME_PREFIX: str = Field(
             default="",
@@ -54,6 +60,7 @@ class Pipe:
 
     def __init__(self):
         self.valves = self.Valves()
+        self.api_base = "https://openrouter.ai/api/v1"
 
     def _get_auth_headers(self) -> dict:
         """Creates authentication headers for API requests."""
@@ -63,39 +70,34 @@ class Pipe:
         }
 
     def _get_request_headers(self) -> dict:
-        """Creates complete headers for chat completion requests.
-        
-        Returns:
-            dict: complete headers for chat completion requests
-        """
-        return {
-            **self._get_auth_headers(),
-            "HTTP-Referer": self.valves.APPLICATION_URL,
-            "X-Title": self.valves.APPLICATION_NAME,
-        }
+        """Creates complete headers for chat completion requests."""
+        headers = self._get_auth_headers()
+        headers.update(
+            {
+                "HTTP-Referer": self.valves.APPLICATION_URL,
+                "X-Title": self.valves.APPLICATION_NAME,
+            }
+        )
+        return headers
 
     def _extract_model_id(self, model_string: str) -> str:
         """
         Extracts the actual OpenRouter model ID from the model string.
-        
+
         The model ID usually comes in as "function_file_name.model_id"
         Example: "openrouter_pipe.google/gemma-7b" -> "google/gemma-7b"
         """
         if "." in model_string:
-            return model_string[model_string.find(".") + 1:]
+            return model_string[model_string.find(".") + 1 :]
         return model_string
 
     def _filter_models_by_authors(self, models: List[dict]) -> List[dict]:
         """Filters models by the specified authors."""
         if not self.valves.MODEL_AUTHORS:
             return models
-        
+
         authors = [author.strip() for author in self.valves.MODEL_AUTHORS.split(",")]
-        return [
-            model
-            for model in models
-            if model["id"].split("/")[0] in authors
-        ]
+        return [model for model in models if model["id"].split("/")[0] in authors]
 
     def _format_pricing_string(self, prompt_price: str, completion_price: str) -> str:
         """Formats pricing information as a display string."""
@@ -111,32 +113,36 @@ class Pipe:
         - Displays decimals with up to 3 decimal places
         """
         # Use Decimal for precise decimal arithmetic to avoid floating point precision issues
-        price_per_million = Decimal(str(price_per_token)) * Decimal('1000000')
-        
+        price_per_million = Decimal(str(price_per_token)) * Decimal("1000000")
+
         # Round to 3 decimal places using banker's rounding (rounds 0.5 up)
-        rounded = price_per_million.quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
-        
+        rounded = price_per_million.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+
         # If it's a whole number, display as integer
         if rounded == rounded.to_integral_value():
             return str(int(rounded))
-        
+
         # Otherwise, display with up to 2 decimal places, removing trailing zeros
         formatted = str(rounded)
-        return formatted.rstrip('0').rstrip('.')
+        return formatted.rstrip("0").rstrip(".")
 
     def _format_model_pricing(self, model: dict) -> str:
         """Formats pricing information for a model."""
-        prompt_price = self.format_price(float(model['pricing']['prompt']))
-        completion_price = self.format_price(float(model['pricing']['completion']))
+        prompt_price = self.format_price(float(model["pricing"]["prompt"]))
+        completion_price = self.format_price(float(model["pricing"]["completion"]))
         return self._format_pricing_string(prompt_price, completion_price)
 
     def _transform_model_to_openwebui_format(self, model: dict) -> dict:
         """Transforms an OpenRouter model to OpenWebUI format."""
-        pricing_display = self._format_model_pricing(model) if self.valves.SHOW_OPENROUTER_MODEL_PRICING else ""
+        pricing_display = (
+            self._format_model_pricing(model)
+            if self.valves.SHOW_OPENROUTER_MODEL_PRICING
+            else ""
+        )
         name = f"{self.valves.NAME_PREFIX}{model['id']}"
         if pricing_display:
             name = f"{name} ({pricing_display})"
-        
+
         return {
             "id": model["id"],
             "name": name,
@@ -145,14 +151,14 @@ class Pipe:
     def filter_stream_line(self, line: bytes) -> bytes:
         """
         Filters out stream comments from SSE response lines.
-        
+
         This is an abstract filter function that can be extended to filter
         different types of stream content. Needs to be bytes to be compatible
         with the OpenWebUI SSE spec.
         """
         if not self.valves.STRIP_OPENROUTER_STREAM_COMMENTS:
             return line
-        
+
         # Filter out OpenRouter processing comments
         filtered = line.replace(b": OPENROUTER PROCESSING", b"")
         return filtered
@@ -167,25 +173,15 @@ class Pipe:
             return {
                 "error": {
                     "code": response.status_code,
-                    "message": f"HTTP {response.status_code}: {response.reason}"
+                    "message": f"HTTP {response.status_code}: {response.reason}",
                 }
             }
 
     def _handle_request_exception(self, exception: Exception) -> dict:
         """Handles request exceptions with appropriate error formatting."""
         if isinstance(exception, requests.exceptions.RequestException):
-            return {
-                "error": {
-                    "code": "request_error",
-                    "message": str(exception)
-                }
-            }
-        return {
-            "error": {
-                "code": "unknown_error",
-                "message": str(exception)
-            }
-        }
+            return {"error": {"code": "request_error", "message": str(exception)}}
+        return {"error": {"code": "unknown_error", "message": str(exception)}}
 
     def pipes(self) -> List[dict]:
         """
@@ -193,13 +189,13 @@ class Pipe:
         Returns a list of model dictionaries in OpenWebUI format.
         """
         if not self.valves.OPENROUTER_API_KEY:
-            return [{"id": "error", "name": "Error: OpenRouter API Key not set in Valves."}]
+            return [ErrorModel("Error: OpenRouter API Key not set in Valves.")]
 
         try:
             headers = self._get_auth_headers()
             response = requests.get(f"{self.api_base}/models", headers=headers)
             response.raise_for_status()
-            
+
             model_data = response.json()["data"]
 
             # Sort models by id alphabetically
@@ -210,19 +206,18 @@ class Pipe:
 
             # Transform to OpenWebUI format
             return [
-                self._transform_model_to_openwebui_format(model)
-                for model in model_data
+                self._transform_model_to_openwebui_format(model) for model in model_data
             ]
 
         except requests.exceptions.RequestException as e:
-            return [{"id": "error", "name": f"Error fetching models: {str(e)}"}]
+            return [ErrorModel(f"Error fetching models: {str(e)}")]
         except Exception as e:
-            return [{"id": "error", "name": f"Error fetching models: {str(e)}"}]
+            return [ErrorModel(f"Error fetching models: {str(e)}")]
 
     def pipe(self, body: dict, __user__: dict) -> Union[str, Iterator[bytes], dict]:
         """
         Handles the chat completion request to OpenRouter.
-        
+
         This is the main pipe function that processes requests and returns
         either streaming responses or complete JSON responses.
         """
@@ -232,14 +227,18 @@ class Pipe:
             return {
                 "error": {
                     "code": "missing_api_key",
-                    "message": "OpenRouter API Key not set in Valves."
+                    "message": "OpenRouter API Key not set in Valves.",
                 }
             }
 
         headers = self._get_request_headers()
         model_id = self._extract_model_id(body["model"])
+
+        if self.valves.OPENROUTER_WEB_SEARCH:
+            model_id += ":online"
+
         payload = {**body, "model": model_id}
-        
+
         # Add preset if configured
         if self.valves.OPENROUTER_PRESET:
             payload["preset"] = self.valves.OPENROUTER_PRESET
@@ -258,10 +257,7 @@ class Pipe:
 
             if body.get("stream", False):
                 # Return iterator for streaming with filtered lines
-                return (
-                    self.filter_stream_line(line)
-                    for line in response.iter_lines()
-                )
+                return (self.filter_stream_line(line) for line in response.iter_lines())
             else:
                 return response.json()
 
