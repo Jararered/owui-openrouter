@@ -34,16 +34,20 @@ class Pipe:
             description="Optional: Whether to use OpenRouter's websearch functionality for all models. This comes at an additional cost listed on OpenRouter.",
         )
         SHOW_OPENROUTER_MODEL_PRICING: bool = Field(
-            default=True,
+            default=False,
             description="Optional: Whether to show pricing information for the models.",
         )
         STRIP_OPENROUTER_STREAM_COMMENTS: bool = Field(
             default=True,
             description="Optional: Whether to filter out stream comments (like ': OPENROUTER PROCESSING') from the response.",
         )
-        MODEL_AUTHORS: str = Field(
+        MODEL_AUTHOR_WHITELIST: str = Field(
             default="",
-            description="Optional: Comma-separated list of model authors to filter by. (e.g. anthropic,google,openai,mistralai,meta-llama,x-ai)",
+            description="Optional: Comma-separated list of model authors to whitelist. (e.g. anthropic,google,openai,mistralai,meta-llama,x-ai)",
+        )
+        MODEL_AUTHOR_BLACKLIST: str = Field(
+            default="",
+            description="Optional: Comma-separated list of model authors to blacklist. (e.g. anthropic,google,openai,mistralai,meta-llama,x-ai)",
         )
         NAME_PREFIX: str = Field(
             default="",
@@ -91,13 +95,21 @@ class Pipe:
             return model_string[model_string.find(".") + 1 :]
         return model_string
 
-    def _filter_models_by_authors(self, models: List[dict]) -> List[dict]:
+    def _apply_author_whitelist(self, models: List[dict]) -> List[dict]:
         """Filters models by the specified authors."""
-        if not self.valves.MODEL_AUTHORS:
+        if not self.valves.MODEL_AUTHOR_WHITELIST:
             return models
 
-        authors = [author.strip() for author in self.valves.MODEL_AUTHORS.split(",")]
+        authors = [author.strip() for author in self.valves.MODEL_AUTHOR_WHITELIST.split(",")]
         return [model for model in models if model["id"].split("/")[0] in authors]
+
+    def _apply_author_blacklist(self, models: List[dict]) -> List[dict]:
+        """Filters models by the specified authors."""
+        if not self.valves.MODEL_AUTHOR_BLACKLIST:
+            return models
+
+        authors = [author.strip() for author in self.valves.MODEL_AUTHOR_BLACKLIST.split(",")]
+        return [model for model in models if model["id"].split("/")[0] not in authors]
 
     def _format_pricing_string(self, prompt_price: str, completion_price: str) -> str:
         """Formats pricing information as a display string."""
@@ -201,8 +213,9 @@ class Pipe:
             # Sort models by id alphabetically
             model_data.sort(key=lambda model: model["id"])
 
-            # Filter models by authors
-            model_data = self._filter_models_by_authors(model_data)
+            # Apply author whitelist and blacklist
+            model_data = self._apply_author_whitelist(model_data)
+            model_data = self._apply_author_blacklist(model_data)
 
             # Transform to OpenWebUI format
             return [
