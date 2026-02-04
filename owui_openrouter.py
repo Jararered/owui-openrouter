@@ -1,9 +1,11 @@
 """
 title: openrouter
-author(s): jararered + gemini-3-pro
-author_url(s): https://github.com/jararered/owui-openrouter + https://deepmind.google/models/gemini/pro/
-version: 0.1.0
+author(s): jararered
+author_url(s): https://github.com/jararered
+version: 0.2.0
 """
+
+
 
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
@@ -121,10 +123,6 @@ class Pipe:
         return result
 
 
-# -----------------------------------------------------------------------------
-# OpenrouterAPI – reusable client (use in other files via: from owui_openrouter import OpenrouterAPI, OpenrouterAPIConfig)
-# -----------------------------------------------------------------------------
-
 
 @dataclass
 class OpenrouterAPIConfig:
@@ -137,6 +135,7 @@ class OpenrouterAPIConfig:
     model_author_blacklist: str = ""
     show_model_pricing: bool = False
     name_prefix: str = ""
+
 
 
 class OpenrouterAPI:
