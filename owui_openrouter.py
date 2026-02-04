@@ -5,11 +5,9 @@ author_url(s): https://github.com/jararered
 version: 0.2.0
 """
 
-
-
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Any, Dict, List, Union, Iterator
+from typing import Any, Dict, List, Optional, Tuple, Union, Iterator
 
 import requests
 from pydantic import BaseModel, Field
@@ -86,12 +84,15 @@ class Pipe:
         filtered = line.replace(b": OPENROUTER PROCESSING", b"")
         return filtered
 
-    def pipes(self) -> List[dict]:
+    def pipes(self) -> List[Dict[str, str]]:
         """
         Fetches the list of available models from OpenRouter.
         Returns a list of model dictionaries in OpenWebUI format.
         """
-        return self.api.get_models()
+        models, error = self.api.get_openrouter_models_json()
+        if error:
+            return [{"id": "error", "name": f"Error: {error}"}]
+        return self.api.extract_name_and_id(models)
 
     def pipe(self, body: dict, __user__: dict) -> Union[str, Iterator[bytes], dict]:
         """
@@ -115,7 +116,6 @@ class Pipe:
         return result
 
 
-
 @dataclass
 class OpenrouterAPIConfig:
     """Configuration for OpenrouterAPI. Pass values from your app's settings."""
@@ -127,7 +127,6 @@ class OpenrouterAPIConfig:
     model_author_blacklist: str = ""
     show_model_pricing: bool = False
     name_prefix: str = ""
-
 
 
 class OpenrouterAPI:
@@ -169,23 +168,25 @@ class OpenrouterAPI:
             return model_string[model_string.find(".") + 1 :]
         return model_string
 
-    def apply_author_whitelist(self, models: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def apply_author_whitelist(
+        self, models: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """Filters models by the specified authors."""
         if not self.config.model_author_whitelist:
             return models
         authors = [
-            author.strip()
-            for author in self.config.model_author_whitelist.split(",")
+            author.strip() for author in self.config.model_author_whitelist.split(",")
         ]
         return [m for m in models if m["id"].split("/")[0] in authors]
 
-    def apply_author_blacklist(self, models: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def apply_author_blacklist(
+        self, models: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """Filters models by the specified authors."""
         if not self.config.model_author_blacklist:
             return models
         authors = [
-            author.strip()
-            for author in self.config.model_author_blacklist.split(",")
+            author.strip() for author in self.config.model_author_blacklist.split(",")
         ]
         return [m for m in models if m["id"].split("/")[0] not in authors]
 
@@ -215,61 +216,55 @@ class OpenrouterAPI:
         completion_price = self.format_price(float(model["pricing"]["completion"]))
         return self.format_pricing_string(prompt_price, completion_price)
 
-    def transform_model_to_openwebui_format(self, model: Dict[str, Any]) -> Dict[str, str]:
-        """Transforms an OpenRouter model to OpenWebUI format."""
-        pricing_display = (
-            self.format_model_pricing(model)
-            if self.config.show_model_pricing
-            else ""
-        )
-        name = f"{self.config.name_prefix}{model['id']}"
-        if pricing_display:
-            name = f"{name} ({pricing_display})"
-        return {"id": model["id"], "name": name}
-
-    def handle_api_error(self, response: requests.Response) -> Dict[str, Any]:
-        """Handles API error responses from OpenRouter."""
-        try:
-            return response.json()
-        except (ValueError, requests.exceptions.JSONDecodeError):
-            return {
-                "error": {
-                    "code": response.status_code,
-                    "message": f"HTTP {response.status_code}: {response.reason}",
-                }
-            }
-
-    def handle_request_exception(self, exception: Exception) -> Dict[str, Any]:
-        """Handles request exceptions with appropriate error formatting."""
-        if isinstance(exception, requests.exceptions.RequestException):
-            return {"error": {"code": "request_error", "message": str(exception)}}
-        return {"error": {"code": "unknown_error", "message": str(exception)}}
-
-    def get_models(self) -> List[Dict[str, str]]:
+    def get_openrouter_models_json(self) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         """
         Fetches the list of available models from OpenRouter.
-        Returns a list of model dictionaries in OpenWebUI format.
+        Returns (list of raw model dicts, error message or None).
         """
         if not self.config.api_key:
-            return [{"id": "error", "name": "Error: OpenRouter API Key not set in Valves."}]
+            return [], "OpenRouter API Key not set in Valves."
 
         try:
             headers = self.get_auth_headers()
             response = requests.get(f"{self.api_base}/models", headers=headers)
             response.raise_for_status()
 
-            model_data = response.json()["data"]
-            model_data.sort(key=lambda m: m["id"])
-            model_data = self.apply_author_whitelist(model_data)
-            model_data = self.apply_author_blacklist(model_data)
-
-            return [
-                self.transform_model_to_openwebui_format(m) for m in model_data
-            ]
+            model_json = response.json()["data"]
+            model_json.sort(key=lambda m: m["id"])
+            model_json = self.apply_author_whitelist(model_json)
+            model_json = self.apply_author_blacklist(model_json)
+            return model_json, None
         except requests.exceptions.RequestException as e:
-            return [{"id": "error", "name": f"Error fetching models: {str(e)}"}]
+            return [], f"Error fetching models: {str(e)}"
         except Exception as e:
-            return [{"id": "error", "name": f"Error fetching models: {str(e)}"}]
+            return [], f"Error fetching models: {str(e)}"
+
+    def extract_name_and_id(self, models: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+        """
+        Extracts id and name from raw OpenRouter model dicts into OpenWebUI format.
+        Applies name_prefix and optional pricing in name from config.
+        """
+        result = []
+        for model in models:
+            pricing_display = (
+                self.format_model_pricing(model)
+                if self.config.show_model_pricing
+                else ""
+            )
+            name = f"{self.config.name_prefix}{model['id']}"
+            if pricing_display:
+                name = f"{name} ({pricing_display})"
+            result.append({"id": model["id"], "name": name})
+        return result
+
+    def get_models(self) -> List[Dict[str, str]]:
+        """
+        Fetches OpenRouter models and returns them in OpenWebUI format (id, name).
+        """
+        models, error = self.get_openrouter_models_json()
+        if error:
+            return [{"id": "error", "name": f"Error: {error}"}]
+        return self.extract_name_and_id(models)
 
     def chat_completion(
         self,
@@ -318,13 +313,21 @@ class OpenrouterAPI:
             )
 
             if not response.ok:
-                return self.handle_api_error(response)
+                try:
+                    return response.json()
+                except (ValueError, requests.exceptions.JSONDecodeError):
+                    return {
+                        "error": {
+                            "code": response.status_code,
+                            "message": f"HTTP {response.status_code}: {response.reason}",
+                        }
+                    }
 
             if stream:
                 return response.iter_lines()
             return response.json()
 
         except requests.exceptions.RequestException as e:
-            return self.handle_request_exception(e)
+            return {"error": {"code": "request_error", "message": str(e)}}
         except Exception as e:
-            return self.handle_request_exception(e)
+            return {"error": {"code": "unknown_error", "message": str(e)}}
