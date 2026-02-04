@@ -15,14 +15,6 @@ import requests
 from pydantic import BaseModel, Field
 
 
-def ErrorModel(message: str) -> dict:
-    """Creates an error model dictionary for display in OpenWebUI."""
-    return {
-        "id": "error",
-        "name": message,
-    }
-
-
 class Pipe:
     class Valves(BaseModel):
         OPENROUTER_API_KEY: str = Field(
