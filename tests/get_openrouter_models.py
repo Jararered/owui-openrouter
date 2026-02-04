@@ -16,15 +16,12 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
-# Import OpenrouterAPI classes from owui_openrouter module
-sys.path.insert(0, str(Path(__file__).parent.parent))
 from owui_openrouter import OpenrouterAPI, OpenrouterAPIConfig
 
 
 def load_api_key() -> str:
     """Load API key from .env file."""
-    env_path = Path(__file__).parent / ".env"
-    load_dotenv(env_path)
+    load_dotenv()
     
     api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
@@ -81,7 +78,9 @@ def get_raw_models(api: OpenrouterAPI) -> dict:
 
 def save_models_to_json(models_data: dict, output_file: str = "openrouter_models.json"):
     """Save models data to JSON file."""
-    output_path = Path(__file__).parent / output_file
+    # Get the directory where this test file is located
+    test_dir = Path(__file__).parent
+    output_path = test_dir / output_file
     
     try:
         with open(output_path, "w", encoding="utf-8") as f:
@@ -100,8 +99,8 @@ def main():
     
     # Load API key
     api_key = load_api_key()
-    print(f"✓ API key loaded from .env file")
-    print(f"  Key prefix: {api_key[:10]}...")
+    print(f"API key loaded from .env file")
+    print(f"Key prefix: {api_key[:10]}...")
     
     # Create OpenrouterAPI instance
     config = OpenrouterAPIConfig(api_key=api_key)

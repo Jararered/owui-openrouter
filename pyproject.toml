@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "owui-openrouter"
+version = "0.2.0"
+description = "OpenWebUI pipe that integrates with OpenRouter to provide access to 400+ AI models"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [
+    {name = "jararered", url = "https://github.com/jararered"}
+]
+license = {text = "MIT"}
+keywords = ["openwebui", "openrouter", "ai", "llm", "pipe"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "requests>=2.25.0",
+    "pydantic>=1.10.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+]
+
+[tool.setuptools]
+py-modules = ["owui_openrouter"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["owui_openrouter*"]
+exclude = ["tests*"]

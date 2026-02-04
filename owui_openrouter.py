@@ -101,7 +101,7 @@ class Pipe:
         """
         return self.api.get_models()
 
-    def pipe(self, body: dict, __user__: dict) -> Union[str, Iterator[bytes], dict]:
+    async def pipe(self, body: dict, __user__: dict) -> Union[str, Iterator[bytes], dict]:
         """
         Handles the chat completion request to OpenRouter.
 
