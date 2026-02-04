@@ -27,43 +27,43 @@ class Pipe:
     class Valves(BaseModel):
         OPENROUTER_API_KEY: str = Field(
             default="",
-            description="OpenRouter API Key (openrouter.ai/keys)",
+            description="API key from openrouter.ai/keys",
         )
         OPENROUTER_PRESET: str = Field(
             default="",
-            description="Optional: OpenRouter preset string (e.g., '@preset/lightning')",
+            description="Preset string (e.g. @preset/lightning)",
         )
         OPENROUTER_WEB_SEARCH: bool = Field(
             default=False,
-            description="Optional: Use OpenRouter's websearch functionality for all models. This comes at an additional cost listed on OpenRouter.",
+            description="Enable web search for all models (extra cost)",
         )
         SHOW_OPENROUTER_MODEL_PRICING: bool = Field(
             default=False,
-            description="Optional: Show pricing information for the models.",
+            description="Show model pricing",
         )
         STRIP_OPENROUTER_STREAM_COMMENTS: bool = Field(
             default=True,
-            description="Optional: Filter out stream comments (like ': OPENROUTER PROCESSING') from the response.",
+            description="Strip stream comments (e.g. : OPENROUTER PROCESSING)",
         )
         MODEL_AUTHOR_WHITELIST: str = Field(
             default="",
-            description="Optional: Comma-separated list of model authors to whitelist (e.g. anthropic,google,openai,mistralai,meta-llama,x-ai)",
+            description="Whitelist authors, comma-separated (e.g. anthropic,openai)",
         )
         MODEL_AUTHOR_BLACKLIST: str = Field(
             default="",
-            description="Optional: Comma-separated list of model authors to blacklist (e.g. anthropic,google,openai,mistralai,meta-llama,x-ai)",
+            description="Blacklist authors, comma-separated",
         )
         NAME_PREFIX: str = Field(
             default="",
-            description="Prefix to be added before model names (e.g. OpenRouter/google/gemma)",
+            description="Prefix for model names (e.g. OpenRouter/google/gemma)",
         )
         APPLICATION_NAME: str = Field(
             default="OpenWebUI",
-            description="Optional: Site name for OpenRouter rankings (X-Title header)",
+            description="Site name (X-Title header)",
         )
         APPLICATION_URL: str = Field(
             default="https://openwebui.com",
-            description="Optional: Site URL for OpenRouter rankings (HTTP-Referer header)",
+            description="Site URL (Referer header)",
         )
 
     def __init__(self):
