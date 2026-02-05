@@ -41,7 +41,7 @@ class Pipe:
         )
         MODEL_AUTHOR_ID_BLACKLIST: str = Field(
             default="",
-            description="Blacklist author IDs, comma-separated",
+            description="Blacklist author IDs, comma-separated (e.g. x-ai,google)",
         )
         NAME_PREFIX: str = Field(
             default="",
