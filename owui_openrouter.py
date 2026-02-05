@@ -35,13 +35,13 @@ class Pipe:
             default=True,
             description="Strip stream comments (e.g. : OPENROUTER PROCESSING)",
         )
-        MODEL_AUTHOR_WHITELIST: str = Field(
+        MODEL_AUTHOR_ID_WHITELIST: str = Field(
             default="",
-            description="Whitelist authors, comma-separated (e.g. anthropic,openai)",
+            description="Whitelist author IDs, comma-separated (e.g. anthropic,openai)",
         )
-        MODEL_AUTHOR_BLACKLIST: str = Field(
+        MODEL_AUTHOR_ID_BLACKLIST: str = Field(
             default="",
-            description="Blacklist authors, comma-separated",
+            description="Blacklist author IDs, comma-separated",
         )
         NAME_PREFIX: str = Field(
             default="",
@@ -76,8 +76,8 @@ class Pipe:
                 # Filter models by author whitelist and blacklist
                 if self.valves.MODEL_AUTHOR_WHITELIST:
                     models = [model for model in models if model["id"].split("/")[0] in self.valves.MODEL_AUTHOR_WHITELIST.split(",")]
-                if self.valves.MODEL_AUTHOR_BLACKLIST:
-                    models = [model for model in models if model["id"].split("/")[0] not in self.valves.MODEL_AUTHOR_BLACKLIST.split(",")]
+                if self.valves.MODEL_AUTHOR_ID_BLACKLIST:
+                    models = [model for model in models if model["id"].split("/")[0] not in self.valves.MODEL_AUTHOR_ID_BLACKLIST.split(",")]
 
                 return [
                     {
