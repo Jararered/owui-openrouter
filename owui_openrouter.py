@@ -40,14 +40,6 @@ class Pipe:
             default="",
             description="Blacklist author IDs, comma-separated (e.g. x-ai,google)",
         )
-        APPLICATION_NAME: str = Field(
-            default="OpenWebUI",
-            description="Site name (X-Title header)",
-        )
-        APPLICATION_URL: str = Field(
-            default="https://openwebui.com",
-            description="Site URL (Referer header)",
-        )
 
     def __init__(self):
         self.valves = self.Valves()
@@ -101,8 +93,8 @@ class Pipe:
         headers = {
             "Authorization": f"Bearer {self.valves.OPENROUTER_API_KEY}",
             "Content-Type": "application/json",
-            "HTTP-Referer": self.valves.APPLICATION_URL,
-            "X-Title": self.valves.APPLICATION_NAME,
+            "HTTP-Referer": "https://openwebui.com",
+            "X-Title": "OpenWebUI",
         }
 
         # Extract model id from the model name
